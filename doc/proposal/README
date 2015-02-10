@@ -1,0 +1,8 @@
+For Linux users: on the directory holding the .tex files run 'make'.
+For others (we know who you are...): open the .tex files in your 'fancy' GUIs.
+
+There may be problems due to lack of some of the packages added in the 
+preamble.tex file: 
+	-# Quick-fix: comment the lines which are giving you problems (e.g. add 
+		a '%' to the start of a line like '\usepackage{cprotect}')
+	-# Long-fix: install the package!

@@ -1,0 +1,112 @@
+%% Modified for NDSS 2015 on 2014/08/07
+%%
+%% bare_conf.tex
+%% V1.3
+%% 2007/01/11
+%% by Michael Shell
+%% See:
+%% http://www.michaelshell.org/
+%% for current contact information.
+%%
+%% This is a skeleton file demonstrating the use of IEEEtran.cls
+%% (requires IEEEtran.cls version 1.7 or later) with an IEEE conference paper.
+%%
+%% Support sites:
+%% http://www.michaelshell.org/tex/ieeetran/
+%% http://www.ctan.org/tex-archive/macros/latex/contrib/IEEEtran/
+%% and
+%% http://www.ieee.org/
+
+%%*************************************************************************
+%% Legal Notice:
+%% This code is offered as-is without any warranty either expressed or
+%% implied; without even the implied warranty of MERCHANTABILITY or
+%% FITNESS FOR A PARTICULAR PURPOSE! 
+%% User assumes all risk.
+%% In no event shall IEEE or any contributor to this code be liable for
+%% any damages or losses, including, but not limited to, incidental,
+%% consequential, or any other damages, resulting from the use or misuse
+%% of any information contained here.
+%%
+%% All comments are the opinions of their respective authors and are not
+%% necessarily endorsed by the IEEE.
+%%
+%% This work is distributed under the LaTeX Project Public License (LPPL)
+%% ( http://www.latex-project.org/ ) version 1.3, and may be freely used,
+%% distributed and modified. A copy of the LPPL, version 1.3, is included
+%% in the base LaTeX documentation of all distributions of LaTeX released
+%% 2003/12/01 or later.
+%% Retain all contribution notices and credits.
+%% ** Modified files should be clearly indicated as such, including  **
+%% ** renaming them and changing author support contact information. **
+%%
+%% File list of work: IEEEtran.cls, IEEEtran_HOWTO.pdf, bare_adv.tex,
+%%                    bare_conf.tex, bare_jrnl.tex, bare_jrnl_compsoc.tex
+%%*************************************************************************
+
+\documentclass[conference]{IEEEtran}
+
+% just a standard preamble i always use for almost all laTEX docs i write, 
+% may be useful (some of the packages may not be installed in your system)
+\input{preamble}
+
+\pagestyle{plain}
+\hyphenation{op-tical net-works semi-conduc-tor}
+
+\begin{document}
+
+% tentative (or definitive ?) title :)
+\title{acceleraTor: Processing Tor Packets on the Fast Lane\\ 
+  {\Large 18-731 Network Security - S15 - Research Project Proposal}
+}
+
+% PUT YOUR NAMES HERE
+\author{\IEEEauthorblockN{António Rodrigues}
+\IEEEauthorblockA{antonior@andrew.cmu.edu}
+\and
+\IEEEauthorblockN{Saurabh Shintre}
+\IEEEauthorblockA{sshintre@andrew.cmu.edu}
+\and
+\IEEEauthorblockN{Soo-Jin Moon}
+\IEEEauthorblockA{soojinm@andrew.cmu.edu}
+\and
+\IEEEauthorblockN{Zijie Lin}
+\IEEEauthorblockA{zjlin@cmu.edu}}
+
+% \IEEEoverridecommandlockouts
+% \makeatletter\def\@IEEEpubidpullup{9\baselineskip}\makeatother
+% \IEEEpubid{\parbox{\columnwidth}{Permission to freely reproduce all or part
+%     of this paper for noncommercial purposes is granted provided that
+%     copies bear this notice and the full citation on the first
+%     page. Reproduction for commercial purposes is strictly prohibited
+%     without the prior written consent of the Internet Society, the
+%     first-named author (for reproduction of an entire paper only), and
+%     the author's employer if the paper was prepared within the scope
+%     of employment.  \\
+%     NDSS '15, 8-11 February 2015, San Diego, CA, USA\\
+%     Copyright 2015 Internet Society, ISBN <TBD>\\
+%     http://dx.doi.org/10.14722/ndss.2015.23xxx
+% }
+% \hspace{\columnsep}\makebox[\columnwidth]{}}
+
+\maketitle
+
+% are we using an abstract in the proposal? i don't think so...
+%\input{abstract}
+
+% the sections we have thought about (and present in the HP doc)
+\input{prob-statement}
+\input{proposal}
+\input{hypotheses}
+\input{experiments}
+\input{results}
+
+% references: this is a copy of my own personal bibliography (hope you don't 
+% mind the size of it)
+\bibliographystyle{IEEEtranS}
+\bibliography{acceleraTor}
+
+% that's all folks
+\end{document}
+
+

@@ -1,0 +1,36 @@
+\section{Experiments}
+\label{sec:experiments}
+
+\textbf{Experiments:}
+
+\begin{itemize}
+	
+	\item Setup a virtualized network with several Tor ORs. We propose a simple setup (i.e. 5-10 nodes), appropriate to highlight the differences between the proposed system --- acceleraTor --- and one or more non-DPDK-enhanced Tor variant(s).
+
+	\item Besides comparing the clockWatcher system against a `vanilla' version of Tor, we propose to compare it against recently proposed `latency-reduction' approaches, such as uTor~\cite{179191} or LasTor~\cite{Akhoondi:2012:LLA:2310656.2310712}
+
+	\item To take advantage of the fast packet processing capabilities provided by DPDK, we shall use NICs supported by the framework (e.g. see DPDK: Supported NICs)
+
+	\item We may need to deal with the difficulty in `measuring' the level of anonymity provided by acceleraTor. 
+
+\end{itemize}
+
+We will mainly focus on measuring latency and data-loss for different sets of applications\slash operations:
+
+\begin{itemize}
+
+	\item Web content download (e.g. web pages, video ‘pseudo-streaming’ over HTTP, etc.)
+	\item Time sensitive network applications such as live video streaming, VoIP applications, video chat, etc.
+
+\end{itemize}
+
+% Choose a set of applications for the demo / performance analysis (ZJ)
+% High definition video streaming (e.g. 720p, 1080p, 4K)
+% Measure metric: the time takes to buffer for 1 minute of the same video
+% Quality of voice streaming such quality of Skype
+% Measure metric: number of pauses over a period of time for the same recorded voice clip
+% Website downloading speed
+% Measure metric: the time taken to load the same website
+% Notes: seems that most of the services not usable or having additional inconvenience over Tor are not due to speed but two reasons (YOU’RE RIGHT ON THIS ONE)
+% the website does not accept anonymous user, such as Yelp which does not allow Tor users to access website even after keying reCaptcha
+% Browser support: mainly lack of plugins and also Torbutton disables many types of active content such as Video conferencing
