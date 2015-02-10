@@ -3,6 +3,15 @@ For others (we know who you are...): open the .tex files in your 'fancy' GUIs.
 
 There may be problems due to lack of some of the packages added in the 
 preamble.tex file: 
-	-# Quick-fix: comment the lines which are giving you problems (e.g. add 
+	* Quick-fix: comment the lines which are giving you problems (e.g. add 
 		a '%' to the start of a line like '\usepackage{cprotect}')
-	-# Long-fix: install the package!
+	* Long-fix: install the package!
+
+The main latex file is acceleraTor.tex: each section has its dedicated file (this 
+may not be 'that' appropriate for a small doc like this proposal, but this is the 
+usual structure I follow in larger docs like reports and papers, so I just used 
+it here too [adamiaonr]). 
+
+The .bib file is huge (2.7 MB)! This is because I simply symlinked my complete 
+bibliography to this latex doc (as I always do now) instead of creating a special 
+.bib file for it. Feel free to erase what it doesn't matter...
