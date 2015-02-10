@@ -1,21 +1,22 @@
 \section{Experiments}
 \label{sec:experiments}
 
-\textbf{Experiments:}
-
+Our plan for experimenting our system, AcceleraTOR, is the following:
 \begin{itemize}
 	
-	\item Setup a virtualized network with several Tor ORs. We propose a simple setup (i.e. 5-10 nodes), appropriate to highlight the differences between the proposed system --- acceleraTor --- and one or more non-DPDK-enhanced Tor variant(s).
+	\item Setup a virtualized network with several Tor ORs. We propose a simple setup (i.e. 5-10 nodes), appropriate to highlight the differences between the proposed system --- AcceleraTOR --- and one or more non-DPDK-enhanced Tor variant(s).
 
-	\item Besides comparing the clockWatcher system against a `vanilla' version of Tor, we propose to compare it against recently proposed `latency-reduction' approaches, such as uTor~\cite{179191} or LasTor~\cite{Akhoondi:2012:LLA:2310656.2310712}
+	\item Besides comparing the AcceraTOR against a `vanilla' version of Tor, we propose to compare it against recently proposed `latency-reduction' approaches, such as uTor~\cite{179191} and/or LasTor~\cite{Akhoondi:2012:LLA:2310656.2310712}
 
 	\item To take advantage of the fast packet processing capabilities provided by DPDK, we shall use NICs supported by the framework (e.g. see DPDK: Supported NICs)
 
-	\item We may need to deal with the difficulty in `measuring' the level of anonymity provided by acceleraTor. 
+	\item Find a means to quantify or at least give a qualitative insight for the impact on Tor's anonymity. This means that we may need to deal with the difficulty in `measuring' the level of anonymity provided by AcceleraTOR. 
 
 \end{itemize}
 
-We will mainly focus on measuring latency and data-loss for different sets of applications\slash operations:
+\textbf{Evaluation:}
+
+For the system evaluation, we will mainly focus on measuring latency and data-loss for different sets of applications\slash operations:
 
 \begin{itemize}
 
