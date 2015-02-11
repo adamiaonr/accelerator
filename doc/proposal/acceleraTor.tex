@@ -56,7 +56,7 @@
 \begin{document}
 
 % tentative (or definitive ?) title :)
-\title{AcceleraTOR: Processing Tor Packets on the Fast Lane\\ 
+\title{AcceleraTOR: Tor in the Fast Lane\\ 
   {\Large Spring15 : 18-731 Network Security - Research Project Proposal}
 }
 
@@ -112,7 +112,7 @@ Our plan for experimenting our system, AcceleraTOR, is the following:
 	
 	\item Setup a virtual network: We propose a simple setup (i.e. 5-10 nodes), appropriate for highlighting the differences between the proposed system --- AcceleraTOR --- and one or more non-DPDK-enhanced Tor variant(s).
 	
-	\item Setup up virtual NICs: To take advantage of the fast packet processing capabilities provided by DPDK, we shall use NICs supported by the framework (e.g. see DPDK: Supported NICs)
+	\item Setup up virtual NICs: To take advantage of the fast packet processing capabilities provided by DPDK, we shall use NICs supported by the framework\footnote{\url{http://dpdk.org/doc/nics}}.
 
 	\item Comparison with existing solutions: Besides comparing the AcceraTOR against a `vanilla' version of Tor, we propose to compare it against recently proposed `latency-reduction' approaches, such as uTor~\cite{179191} and/or LasTor~\cite{Akhoondi:2012:LLA:2310656.2310712}
 
@@ -176,13 +176,12 @@ and milestones.
 
 	\begin{itemize}
 
-		\item Coupling between Tor and DPDK libs - find the place for optimal 
-		integration
+		\item Integration between Tor and libs provided by DPDK framework
 
 		\item Integration of recently proposed latency-reduction techniques in 
 		the AcceleraTOR system
 		
-		\item Design and Integration of latency-reduction techniques devised 
+		\item Design and integration of latency-reduction techniques devised 
 		by ourselves
 
 	\end{itemize}
@@ -201,9 +200,9 @@ and milestones.
 
 	\item (\textit{mid to end March}) Software implementation finished
 	\item (\textit{mid to end March}) Test bed setup `ready to roll' and run initial release of 
-		AcceleraTOR 
+		AcceleraTOR OR software
 	\item (\textit{mid March to early April}) Test, collect data, solve problems in 
-		implementation, re-test, re-collect data
+		implementation, re-test, re-collect data, ...
 	\item (\textit{rest of April}) Write report, make a poster, and polish presentation 
 
 \end{itemize}
