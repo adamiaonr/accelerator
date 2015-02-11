@@ -73,33 +73,141 @@
 \IEEEauthorblockN{Zijie Lin}
 \IEEEauthorblockA{zjlin@cmu.edu}}
 
-% \IEEEoverridecommandlockouts
-% \makeatletter\def\@IEEEpubidpullup{9\baselineskip}\makeatother
-% \IEEEpubid{\parbox{\columnwidth}{Permission to freely reproduce all or part
-%     of this paper for noncommercial purposes is granted provided that
-%     copies bear this notice and the full citation on the first
-%     page. Reproduction for commercial purposes is strictly prohibited
-%     without the prior written consent of the Internet Society, the
-%     first-named author (for reproduction of an entire paper only), and
-%     the author's employer if the paper was prepared within the scope
-%     of employment.  \\
-%     NDSS '15, 8-11 February 2015, San Diego, CA, USA\\
-%     Copyright 2015 Internet Society, ISBN <TBD>\\
-%     http://dx.doi.org/10.14722/ndss.2015.23xxx
-% }
-% \hspace{\columnsep}\makebox[\columnwidth]{}}
-
 \maketitle
 
 % are we using an abstract in the proposal? i don't think so...
 %\input{abstract}
 
 % the sections we have thought about (and present in the HP doc)
-\input{prob-statement}
-\input{proposal}
-\input{hypotheses}
-\input{experiments}
-\input{results}
+%\input{prob-statement}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%Problem statement
+\section{Problem statement}
+Tor~\cite{Dingledine:2004:TSO:1251375.1251396} is the most prominent and widely used low-latency anonymous network. A Tor client choses a  random path consisting of multiple relay nodes (ORs) and  establishes shared keys with the relay nodes. Packets are encrypted in layers using the key shared with each OR on the path. On the reception of packets,  an OR decrypts the outermost layer  and forwards the remaining packet to next OR, or the destination if he is the exit node. Unlike mix networks, Tor does not perform any explicit delaying and reordering of packets, and instead relies upon the  generation of sufficient traffic in the network to avoid traffic analysis. 
+
+However, there are two problems that Tor faces: 1) lack of explicit mixing makes Tor vulnerable to side channel attacks; e.g. Murdoch and Danezis~\cite{Murdoch:2005:LTA:1058433.1059390}, and 2) the packet delay is still large to support faster applications, such as VoIP, and video streaming. We goal of this project is  to develop a faster version of Tor through faster packet processing and make it usable for such applications. Faster processing will also allow ORs to perform explicit mixing of packets and improve anonymity provided by Tor.
+
+%\input{proposal}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%Proposal
+\section{Proposal}
+
+%Tor provides increased anonymity in network communication by the use of set of relays. Tor networks introduce the idea of taking a random pathway through set of relays for the purpose of hiding the origin of data packets. Introduction of these extra `random' hops is a fundamental idea in increasing anonymity and also the cause of increased latency.
+ 
+Studies performed in the period Dec 2010-Jan 2011 found that ``(...) the average ratio of HTTP request durations (Tor/direct) [from around the world] is 4.1 (...)''~\cite{fi4020488}. However, recent research suggests that  download speeds for the direct Internet and ToR browsing are comaprable\footnote{\label{note1}\url{http://tor.stackexchange.com/questions/4459/how-does-tor-network-latency-speed-compare-with-direct-internet}}. Download speeds of web pages alone cannot be relied upon to draw comparison between regular Internet and Tor browsing, and other factors, such as packet loss and performance for delay-intolerant applications,  must also be considered. A vast majority of users - accounting for over 90\% of TCP connections on Tor~\cite{Mccoy:2008:SLD:1428259.1428264} - are known to use Tor for interactive traffic. Such usage pattern implies that reduction in  latency in ToR network will have a significant impact on its overall usability. 
+
+Our approach to achieve this goal relies on reducing the latency incurred at  Onion Routers (ORs) in processing and relaying packets.  We intend to  use  the Data Plane Development Kit (DPDK)\footnote{\url{http://dpdk.org}}, which allows for fast data plane performance (packet processing) at a user-level. In particular, we propose to integrate recent techniques for latency reduction in Tor with DPDK’s Environment Abstraction Layer (EAL) (e.g. third-party fast path user-level stacks such as uTor~\cite{179191}). We expect that performance of ToR will benefit from DPDK's optimized algorithms, and enhance the performance of existing implementations.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%Hypotheses
+\section{Hypotheses}
+We expect that AcceleraTOR increases the performance of Tor networks by benefiting from the use of DPDK for the ToR network. The key elements in DPDK (buffer, queue, packet flow classification and NIC management) and select use of these libraries are expected to incur low latency compared to the current implementations of Tor.
+
+AcceleraTOR hopes to achieve low latency by modifying the ways packets are being handled in ORs. The question lies in the percentage of gain that DPDK can bring to the Tor network which can be roughly answered by first pinpointing the main sources in high latency in ToR network. In~\cite{Dingledine:2004:TSO:1251375.1251396} Dingledine et al. state that the `delay' incurred by Tor is mostly due to (1) the establishment of Tor virtual circuits among Onion Routers (ORs) (``tenths of seconds''); (2) rotating between circuits to limit linkability among multiple TCP streams established by some user. In addition, the operations which mostly contribute to circuit establishment delay are (1) public key encryption; and (2) network latency. These suggest that the bottleneck of the network does not lie in user-level packet forwarding operations, and therefore not influenced by the DPDK. Therefore, the enhancements brought about by DPDK may not be \textit{too} significant: nevertheless, we deem it worthwhile to see the implication of introducing DPDK into Tor network and see further implication on the impact on Tor anonymity. Especially, we can infer some impact on anonymity, if any, by the batching of packets used as an optimization technique by DPDK. 
+
+There have been several efforts trying to reduce the latency in Tor networks. Nowlan et al.~\cite{179191} propose latency reduction by relaxing the requirements of strict in-order delivery of TCP. The chosen method is comparable to our proposed system by modifying the ways that packets are forwarded at the application level. The result claims to have alleviated application-perceived latency. Our approach anticipates the performance benefit by introducing DPDK - which bring the performance gain through buffer, memory, packet flow, and NIC management. Akhoondi et al. propose LasTor~\cite{Akhoondi:2012:LLA:2310656.2310712} as an attempt to reduce the latency in ToR network by making the client-side modifications and not requiring the revamp of the ToR architecture. However, this performance gain is at the expense of loss of anonymity. Our proposed  approach is not expected to bring anonymity trade-off like LasTor. Mainly due to orthogonal approaches being taken by LasTor and AcceleraTOR, both approaches can be coupled to bring even further performance gain in ToR networks. 
+%\input{hypotheses}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%Experiments
+\section{Experiments}
+Our plan for experimenting our system, AcceleraTOR, is the following:
+\begin{itemize}
+	
+	\item Setup a virtual network: We propose a simple setup (i.e. 5-10 nodes), appropriate for highlighting the differences between the proposed system --- AcceleraTOR --- and one or more non-DPDK-enhanced Tor variant(s).
+	
+	\item Setup up virtual NICs: To take advantage of the fast packet processing capabilities provided by DPDK, we shall use NICs supported by the framework (e.g. see DPDK: Supported NICs)
+
+	\item Comparison with existing solutions: Besides comparing the AcceraTOR against a `vanilla' version of Tor, we propose to compare it against recently proposed `latency-reduction' approaches, such as uTor~\cite{179191} and/or LasTor~\cite{Akhoondi:2012:LLA:2310656.2310712}
+
+	\item Quantitative analysis of performance: Find a means to quantify or at least give a qualitative insight for the impact on Tor's anonymity. This means that we may need to deal with the difficulty in `measuring' the level of anonymity provided by AcceleraTOR. 
+
+\end{itemize}
+
+\textbf{Evaluation:}
+
+For the system evaluation, we will mainly focus on measuring latency and data-loss for different sets of applications\slash operations:
+
+\begin{itemize}
+
+	\item Web content download (e.g. web pages, video ‘pseudo-streaming’ over HTTP, etc.)
+	\item Time sensitive network applications such as live video streaming, VoIP applications, video chat, etc.
+
+\end{itemize}
+
+
+
+%\input{experiments}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%Results
+\section{Expected results}
+In this section, we list the outcomes expected upon completion of the project 
+and milestones.
+
+% \subsection{Outcomes}
+% \label{subsec:res-outcomes}
+
+% \subsection{Milestones}
+% \label{subsec:res-milestones}
+
+\textbf{Outcomes:}
+
+\begin{itemize}
+	
+	\item A modified version of Tor OP\slash OR software - the AcceleraTOR 
+	system - well integrated with DPDK libraries and possibly incorporating 
+	recently proposed techniques for latency reduction in Tor (e.g. 
+	uTor~\cite{179191}, etc.)
+	
+	\item A latency reduction of x\% (x $> 0$) while performing different sets 
+	of operations \slash running different applications over Tor (e.g. download 
+	of web content, live video streaming, etc.)
+	
+	\item Qualitative understanding and/or quantitative results (perhaps graphs) of the 
+	latency-anonymity trade-offs present in the clockWatcher system
+	
+	\item Comparison of AcceleraTOR to related work 
+	
+	\item At least a final report \& poster combo! Maybe a paper (equivalent of a workshop version).
+
+\end{itemize}
+
+\textbf{Milestones:}
+
+\begin{itemize}
+
+	\item (\textit{End of Feb}) Software specification for the AcceleraTOR system: 
+
+	\begin{itemize}
+
+		\item Coupling between Tor and DPDK libs - find the place for optimal 
+		integration
+
+		\item Integration of recently proposed latency-reduction techniques in 
+		the AcceleraTOR system
+		
+		\item Design and Integration of latency-reduction techniques devised 
+		by ourselves
+
+	\end{itemize}
+
+	\item (\textit{End of Feb}) Specifications for test bed:
+
+	\begin{itemize}
+
+		\item Structure of the test bed network (e.g. how many nodes, topology, etc.)
+
+		\item Network virtualization tools to use, how to use them, etc.
+
+		\item Selection of DPDK-supported NICs to use in OP\slash OR nodes
+
+	\end{itemize}
+
+	\item (\textit{mid to end March}) Software implementation finished
+	\item (\textit{mid to end March}) Test bed setup `ready to roll' and run initial release of 
+		AcceleraTOR 
+	\item (\textit{mid March to early April}) Test, collect data, solve problems in 
+		implementation, re-test, re-collect data
+	\item (\textit{rest of April}) Write report, make a poster, and polish presentation 
+
+\end{itemize}
+%\input{results}
 
 % references: this is a copy of my own personal bibliography (hope you don't 
 % mind the size of it)
