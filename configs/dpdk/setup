@@ -1,0 +1,57 @@
+# steps followed to setup dpdk for a test run *** WARNING: PRELIM. VERSION ***
+# steps taken from: 
+#	-# https://wiki.linaro.org/LNG/Engineering/OVSDPDKOnUbuntu and 
+# 	-# http://dpdk.org/doc/quick-start
+#	-# http://plvision.eu/blog/deploying-intel-dpdk-in-oracle-virtualbox/
+#	-# https://gist.github.com/ConradIrwin/9077440
+# created by: antonior@andrew.cmu.edu
+
+#!/bin/sh
+
+DPDK=/home/clockwatcher/workbench/accelerator/lib/dpdk
+DPDK_RTE_TARGET=$DPDK/i686-native-linuxapp-gcc
+DPDK_NIC_BIND_TOOL=$DPDK/tools/dpdk_nic_bind.py
+
+HUGETLBFS_DIR="/mnt/huge"
+
+# 1) just in case, have ifaces eth0, eth1 and eth2 acquire IP addr via DHCP
+dhclient eth0
+dhclient eth1
+dhclient eth2
+
+cd $DPDK
+
+# 2) load dpdk's specialized kernel module to allow userspace apps to control 
+# the network card
+modprobe uio
+sudo insmod $DPDK_RTE_TARGET/kmod/igb_uio.ko
+
+# 3) bind eth0 and eth1 ifaces to dpdk
+
+# 3.1) show the current 'binding' status of network cards (should be to 
+# 'e1000')
+$DPDK_NIC_BIND_TOOL --status
+
+# 3.2) --force the --bind of eth0 and eth1 ifaces to dpdk's igb_uio driver
+$DPDK_NIC_BIND_TOOL --force --bind=igb_uio eth0
+$DPDK_NIC_BIND_TOOL --force --bind=igb_uio eth1
+
+# 3.3) show new status of iface bindings
+$DPDK_NIC_BIND_TOOL --status
+
+# 4) mount hugetlbfs (still not entirely sure why this is necessary... 
+# apparently to reserve huge pages memory for dpdk...)
+
+# 4.1) 
+sysctl -w vm.nr_hugepages=320
+
+# 4.2) 
+if [ ! -d "$HUGETLBFS_DIR" ]; then
+	
+	mkdir -p $HUGETLBFS_DIR
+fi
+
+# 4.3) 
+mount -t hugetlbfs hugetlbfs $HUGETLBFS_DIR
+
+exit 0
