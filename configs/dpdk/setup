@@ -6,7 +6,7 @@
 #	-# https://gist.github.com/ConradIrwin/9077440
 # created by: antonior@andrew.cmu.edu
 
-#!/bin/sh
+#!/bin/bash
 
 DPDK=/home/clockwatcher/workbench/accelerator/lib/dpdk
 DPDK_RTE_TARGET=$DPDK/i686-native-linuxapp-gcc
@@ -38,10 +38,17 @@ while [ "$1" != "" ]; do
 
 done
 
-# 1) just in case, have ifaces eth0, eth1 and eth2 acquire IP addr via DHCP
+# 1.1) just in case, have ifaces eth0, eth1 and eth2 acquire IP addr via DHCP
 dhclient eth0
 dhclient eth1
 dhclient eth2
+
+# 1.2) ping the host address in the vboxnet(x) host-only network(s)
+ping -c 3 192.168.56.1
+ping -c 3 192.168.57.1
+
+printf 'press [ENTER] to continue...'
+read _
 
 cd $DPDK
 
