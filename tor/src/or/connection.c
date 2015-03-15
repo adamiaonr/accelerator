@@ -426,6 +426,24 @@ connection_init(time_t now, connection_t *conn, int type, int socket_family)
 #ifndef USE_BUFFEREVENTS
   if (!connection_is_listener(conn)) {
     /* listeners never use their buf */
+
+	// TODO: if DPDK uses a common mempool, how will we allocate different
+	// input and output queues? look at the RX and TX queue init sections in
+	// http://dpdk.org/doc/guides/sample_app_ug/l2_forward_real_virtual.html
+	// and rte_eth_rx_queue_setup()
+
+	// TODO: also, is this a candidate place for the use of DPDK's Ring
+	// library, aka the DPDK's buffers? or maybe the Mbuf library (yeah
+	// i think this is the one we need to use):
+	// http://dpdk.org/doc/guides/prog_guide/mbuf_lib.html#mbuf-library
+	// we would only have to replace the
+	// interfaces provided by buffers.* (read_to_buf() or write_to_buf()) to
+	// those provided by DPDK (be SUREs to know if the mempool lib already
+	// takes care of this, we may not need to use DPDK rings directly...)
+	// http://dpdk.org/doc/guides/prog_guide/ring_lib.html
+
+	// TODO: maybe we need to change the type of inbuf and outbuf to DPDK's
+	// Mbuf
     conn->inbuf = buf_new();
     conn->outbuf = buf_new();
   }

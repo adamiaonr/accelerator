@@ -2101,6 +2101,9 @@ do_main_loop(void)
 
     /* poll until we have an event, or the second ends, or until we have
      * some active linked connections to trigger events for. */
+    // TODO: maybe change use of libevent to DPDK's own polling mechanism. look
+    // at l2fwd example. we probably need to BYPASS this one too...
+    // http://dpdk.org/doc/guides/sample_app_ug/l2_forward_real_virtual.html
     loop_result = event_base_loop(tor_libevent_get_base(),
                                   called_loop_once ? EVLOOP_ONCE : 0);
 
