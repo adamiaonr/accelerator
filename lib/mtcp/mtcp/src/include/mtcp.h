@@ -89,7 +89,10 @@ struct eth_table
 	char dev_name[128];
 	int ifindex;
 	int stat_print;
-	unsigned char haddr[ETH_ALEN];
+	// TODO: merging point: change the unsigned char to DPDK's ether_addr
+	// struct (note the implications in eth_table handling now)
+	//unsigned char haddr[ETH_ALEN];
+	struct ether_addr haddr;
 	uint32_t netmask;
 //	unsigned char dst_haddr[ETH_ALEN];
 	uint32_t ip_addr;

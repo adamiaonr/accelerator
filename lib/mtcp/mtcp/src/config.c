@@ -22,6 +22,12 @@
 static const char *route_file = "config/route.conf";
 static const char *arp_file = "config/arp.conf";
 
+// TODO: merging point: keyword for counting queues in GetNumQueues()
+#ifdef USE_DPDK
+static const char * queue_num_keyword = "igb_uio";
+#else
+static const char * queue_num_keyword = "xge0-rx";
+#endif
 /*----------------------------------------------------------------------------*/
 static int 
 GetIntValue(char* value)
@@ -257,11 +263,54 @@ SetRoutingTable()
 int 
 GetNumQueues()
 {
-	FILE *fp;
+	FILE * fp;
 	char buf[MAX_PROCLINE_LEN];
 	int queue_cnt;
 		
+	// XXX:	q: why does one count queues on /proc/interrupts?
+	// 		a: according to http://goo.gl/mFRKvw :
+	//			"queues are intuitively named and easy to identify in
+	//			/proc/interrupts output. For unpaired queues, they will
+	//			appear similar to eth1-rx-0 and eth1-tx-0, while paired
+	//			queues will appear like eth1-TxRx-0"
+
+	//			basically, this file shows the affinity between queues and
+	//			CPUs. e.g. in my vbox accelerator machine, before i run
+	//			our custom configs/dpdk/setup script, i have the following
+	//			contents for /proc/interrupts :
+
+	//		CPU0       CPU1
+	//	 0:         44          0   IO-APIC-edge      timer
+	//	 1:         10          0   IO-APIC-edge      i8042
+	//	 8:          0          0   IO-APIC-edge      rtc0
+	//	 9:          0          0   IO-APIC-fasteoi   acpi
+	//	12:        149          0   IO-APIC-edge      i8042
+	//	14:          0          0   IO-APIC-edge      ata_piix
+	//	15:        233          0   IO-APIC-edge      ata_piix
+	//	16:         20         81   IO-APIC-fasteoi   eth0
+	//	17:        977          0   IO-APIC-fasteoi   eth1, eth2
+	//	21:       2644          0   IO-APIC-fasteoi   ahci, snd_intel8x0
+	//	22:         27          0   IO-APIC-fasteoi   ohci_hcd:usb1
+
+	// after i run configs/dpdk/setup --nr_hugepages 1024 --install-kni, the
+	// contents change to :
+
+	//		CPU0       CPU1
+	//	 0:         44          0   IO-APIC-edge      timer
+	//	 1:         10          0   IO-APIC-edge      i8042
+	//	 8:          0          0   IO-APIC-edge      rtc0
+	//	 9:          0          0   IO-APIC-fasteoi   acpi
+	//	12:        149          0   IO-APIC-edge      i8042
+	//	14:          0          0   IO-APIC-edge      ata_piix
+	//	15:        471          0   IO-APIC-edge      ata_piix
+	//	16:         20        225   IO-APIC-fasteoi   igb_uio
+	//	17:       1338          0   IO-APIC-fasteoi   eth2, igb_uio
+	//	21:       2700          0   IO-APIC-fasteoi   ahci, snd_intel8x0
+	//	22:         27          0   IO-APIC-fasteoi   ohci_hcd:usb1
+
+	// so i guess we should be looking for lines with "igb_uio"
 	fp = fopen("/proc/interrupts", "r");
+
 	if (!fp) {
 		TRACE_CONFIG("Failed to read data from /proc/interrupts!\n");
 		return -1;
@@ -269,15 +318,23 @@ GetNumQueues()
 
 	/* count number of NIC queues from /proc/interrupts */
 	queue_cnt = 0;
+
 	while (!feof(fp)) {
+
 		if (fgets(buf, MAX_PROCLINE_LEN, fp) == NULL)
 			break;
 
 		/* "xge0-rx" is the keyword for counting queues */
-		if (strstr(buf, "xge0-rx")) {
+		// basically this code reads through /proc/interrupts, checks how many
+		// lines are there which match the keyword (see comments above for
+		// details on this)
+		// TODO: do we need to change the "xge0-rx" keyword for DPDK? in DPDK's
+		// case maybe "igb_uio"?
+		if (strstr(buf, queue_num_keyword)) {
 			queue_cnt++;
 		}
 	}
+
 	fclose(fp);
 
 	return queue_cnt;
@@ -292,67 +349,113 @@ SetInterfaceInfo()
 	
 	TRACE_CONFIG("Loading interface setting\n");
 			
-	CONFIG.eths = (struct eth_table *)
-			calloc(MAX_DEVICES, sizeof(struct eth_table));
+	CONFIG.eths =
+			(struct eth_table *) calloc(
+										MAX_DEVICES,
+										sizeof(struct eth_table));
+
 	if (!CONFIG.eths) 
 		exit(EXIT_FAILURE);
 
-	// Create socket 
+	// TODO: merging point: we may have to bypass some ioctl() calls by using
+	// DPDK-specific calls, while still filling mTCP-specific structs
+
+	// 1) socket for ioctl() calls
 	int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+
 	if (sock == -1) {
 		perror("socket");
 	}
 
 	for (i = 0; i < num_devices; i++) {
-		strcpy(ifr.ifr_name, devices[i].name);
 
-		//getting interface information
+		// i) DPDK-specific call to get eth device info
+		rte_eth_dev_info_get((uint8_t) i, &devices[i]);
+
+		// ii) dev_name: update the dev_name string in CONFIG
+		// TODO: have no idea where to fetch this, note that
+		// devices is now an array of struct rte_eth_dev_info. maybe the
+		// driver_name field?
+		//strcpy(ifr.ifr_name, devices[i].name);
+
+		// ii.1) build up a if_name using the same format as shown in pspgen.c,
+		// line 1083, available here: http://goo.gl/a7ibVE
+		char if_name[64] = '\0';
+		snprintf(if_name, 64, "%s.%d", devices[i].driver_name, i);
+
+		// ii.2) copy if_name to ifr.ifr_name
+		strcpy(ifr.ifr_name, if_name);
+
+		// iii) the subsequent ioctl() calls add more info to that gathered
+		// via rte_eth_dev_info_get
 		if (ioctl(sock, SIOCGIFFLAGS, &ifr) == 0) {
 			
-			// Setting informations
 			eidx = CONFIG.eths_num++;
 			strcpy(CONFIG.eths[eidx].dev_name, ifr.ifr_name);
-			CONFIG.eths[eidx].ifindex = devices[i].ifindex;
+
+			// iv) ifindex: i? devices[i].pci_dev->addr.devid?
+			//CONFIG.eths[eidx].ifindex = devices[i].ifindex;
+			CONFIG.eths[eidx].ifindex = i;
 			
-			//geting address
+			// v) ip_addr: not gathered in rte_eth_dev_info_get()
 			if (ioctl(sock, SIOCGIFADDR, &ifr) == 0 ) {
-				struct in_addr sin = ((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr;
-				CONFIG.eths[eidx].ip_addr = *(uint32_t *)&sin;
+				struct in_addr sin =
+						((struct sockaddr_in *) &ifr.ifr_addr)->sin_addr;
+				CONFIG.eths[eidx].ip_addr = *(uint32_t *) &sin;
 			}
 
+			// vi) haddr: now a ether_addr struct
 			if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0 ) {
-				for (j = 0; j < 6; j ++) {
-					CONFIG.eths[eidx].haddr[j] = ifr.ifr_addr.sa_data[j];
-				}
+
+//				for (j = 0; j < 6; j ++) {
+//					CONFIG.eths[eidx].haddr[j] = ifr.ifr_addr.sa_data[j];
+//				}
+				rte_eth_macaddr_get((uint8_t) i, &CONFIG.eths[eidx].haddr);
 			}
 			
-			/* Net MASK */
+			// vii) netmask:
 			if (ioctl(sock, SIOCGIFNETMASK, &ifr) == 0) {
-				struct in_addr sin = ((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr;
-				CONFIG.eths[eidx].netmask = *(uint32_t *)&sin;
+				struct in_addr sin =
+						((struct sockaddr_in *) &ifr.ifr_addr)->sin_addr;
+				CONFIG.eths[eidx].netmask = *(uint32_t *) &sin;
 			}
 
-			// add to attached devices
+			// viii) add to attached devices
 			for (j = 0; j < num_devices_attached; j++) {
 				if (devices_attached[j] == devices[i].ifindex) {
 					break;
 				}
-			}			
+			}
+
 			devices_attached[num_devices_attached] = devices[i].ifindex;
 			num_devices_attached++;
 
 		} else { 
+
 			perror("SIOCGIFFLAGS");
 		}
 	}
 
+	// TODO: this will have to be changed: either (1) change num_queues to
+	// hold the values returned by rte_eth_dev_info_get() or (2) pass an
+	// input argument to GetNumQueues() which specifies what is the keyword
+	// in /proc/interrupts we need to look for.
+
+	// in DPDK examples, e.g. l2fwd, this value is defined as the 'number of
+	// RX queues per core', it is given as an argument, default value is 1
 	num_queues = GetNumQueues();
+
 	if (num_queues <= 0) {
+
 		TRACE_CONFIG("Failed to find NIC queues!\n");
+
 		return -1;
 	}
+
 	if (num_queues > num_cpus) {
+
 		TRACE_CONFIG("Too many NIC queues available.\n");
+
 		return -1;
 	}
 

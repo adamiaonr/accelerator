@@ -6,7 +6,15 @@
 #include <assert.h>
 
 #include "cpu.h"
-#include "ps.h"
+
+// TODO: DPDK <-> mTCP merging point: in order to port mTCP to DPDK we need to
+// change all files which invoke functions made available by the ps lib. this
+// fairly restricted to:
+//	-# core.c
+//	-# ip_in.c
+//	-# eth_in.c
+//	-# eth_out.c
+//#include "ps.h"
 #include "eth_in.h"
 #include "fhash.h"
 #include "tcp_send_buffer.h"
@@ -23,6 +31,27 @@
 #include "ip_out.h"
 #include "timer.h"
 #include "debug.h"
+
+// TODO: include all DPDK related stuff here. based on:
+// https://github.com/ANLAB-KAIST/pspgen-dpdk/blob/master/pspgen.c
+#include <rte_config.h>
+#include <rte_common.h>
+#include <rte_eal.h>
+#include <rte_atomic.h>
+#include <rte_errno.h>
+#include <rte_log.h>
+#include <rte_cycles.h>
+#include <rte_byteorder.h>
+#include <rte_spinlock.h>
+#include <rte_malloc.h>
+#include <rte_timer.h>
+#include <rte_mempool.h>
+#include <rte_malloc.h>
+#include <rte_ring.h>
+#include <rte_ethdev.h>
+#include <rte_ether.h>
+#include <rte_ip.h>
+#include <rte_udp.h>
 
 #define PS_CHUNK_SIZE 64
 #define RX_THRESH (PS_CHUNK_SIZE * 0.8)
@@ -43,6 +72,11 @@
 #define PS_SELECT_TIMEOUT 100		// in us 
 
 #define GBPS(bytes) (bytes * 8.0 / (1000 * 1000 * 1000))
+
+/*----------------------------------------------------------------------------*/
+// TODO: merging point: DPDK-related macros
+#define MBUF_SIZE (2048 + sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM)
+#define NB_MBUF   8192
 
 /*----------------------------------------------------------------------------*/
 /* handlers for threads */
@@ -66,6 +100,9 @@ static int printer = -1;
 #endif /* ROUND_STAT */
 #endif /* NETSTAT_TOTAL */
 #endif /* NETSTAT */
+/*----------------------------------------------------------------------------*/
+// TODO: merging point: DPDK-related vars
+struct rte_mempool * mtcp_pktmbuf_pool = NULL;
 /*----------------------------------------------------------------------------*/
 void
 HandleSignal(int signal)
@@ -791,6 +828,8 @@ RunMainLoop(struct mtcp_thread_context *ctx)
 	int thresh;
 
 	/* initialization*/
+	// TODO: merging point: call DPDK device and queue initialization
+	// functions here.
 	ret = ps_alloc_chunk(handle, &chunk);
 	assert(ret == 0);
 
@@ -871,12 +910,33 @@ RunMainLoop(struct mtcp_thread_context *ctx)
 			/* receive packets */
 			chunk.cnt = PS_CHUNK_SIZE;
 			STAT_COUNT(mtcp->runstat.rounds_rx_try);
+
+			// TODO: merging point - mTCP reads packets from eth devices here.
+			// this is where mTCP needs to call rte_eth_rx_burst(). in general
+			// the args of rte_eth_rx_burst() are:
+			//	-# port_id: port identifier of the eth device (<=> information
+			// 		is got via the handle object. first
+			//		one must get (1) nr of eth devices via rte_eth_dev_count();
+			//		(2) gather eth device info via rte_eth_dev_info_get() and
+			// 		rte_eth_macaddr_get(); (3) attach devices (...)
+			//	-# queue_id: index of rx queue from which to receive packets
+			//		(<=> rx_inf)
+			// 	-# rx_pckts:  address of an array of pointers to rte_mbuf
+			//		structures that must be large enough to store nb_pkts
+			//		pointers in it (<=> chunk)
+			//	-# nb_pckts: max. number of packets to retrieve
 			recv_cnt = ps_recv_chunk_ifidx(handle, &chunk, rx_inf);
+
 			if (recv_cnt < 0) {
 				if (errno != EAGAIN) {
 					TRACE_ERROR("ps_recv_chunk_ifidx failed to read packet.\n");
 					perror("ps_recv_chunk_ifidx()");
 				}
+
+				// TODO: this sets the descriptors or references which the
+				// ps_select() call is monitoring (even though the answer to
+				// the applications is gonna be an error,
+				// i.e. no_rx_packet = 1).
 				NID_SET(rx_inf, event.rx_nids);
 				no_rx_packet = 1;
 			} else if (recv_cnt == 0) {
@@ -884,12 +944,17 @@ RunMainLoop(struct mtcp_thread_context *ctx)
 				no_rx_packet = 1;
 			} else {
 				for (i = 0; i < recv_cnt; i++) {
+
+					// TODO: here the packet is sent to mTCP's internal
+					// processing logic (ETH -> IPv4 -> TCP)
 					ProcessPacket(mtcp, chunk.queue.ifindex, ts, 
 							(u_char *)(chunk.buf + chunk.info[i].offset), 
 							chunk.info[i].len);
 				}
 			}
 
+			// TODO: still not sure about the difference between event.rx_nids
+			// and rx_avail. both seem file descriptor sets.
 			if (!no_rx_packet)
 				NID_SET(rx_inf, rx_avail);
 		}
@@ -1329,9 +1394,9 @@ InitializeMTCPManager(struct mtcp_thread_context* ctx)
 }
 /*----------------------------------------------------------------------------*/
 static void *
-MTCPRunThread(void *arg)
+MTCPRunThread(void * arg)
 {
-	mctx_t mctx = (mctx_t)arg;
+	mctx_t mctx = (mctx_t) arg;
 	int cpu = mctx->cpu;
 	int working;
 	struct mtcp_manager *mtcp;
@@ -1356,12 +1421,14 @@ MTCPRunThread(void *arg)
 		exit(-1);
 	}
 
+	// TODO: merging point: ps-related initializations are done at this point,
+	// so this is a natural point for DPDK-related initializations
 	// ps initializing
-	if (ps_init_handle(ctx->handle)) {
-		perror("ps_init_handle");
-		TRACE_ERROR("Failed to initialize ps handle.\n");
-		exit(1);
-	}
+//	if (ps_init_handle(ctx->handle)) {
+//		perror("ps_init_handle");
+//		TRACE_ERROR("Failed to initialize ps handle.\n");
+//		exit(1);
+//	}
 
 	ctx->cpu = cpu;
 	mtcp = ctx->mtcp_manager = InitializeMTCPManager(ctx);
@@ -1642,7 +1709,7 @@ mtcp_setconf(const struct mtcp_conf *conf)
 }
 /*----------------------------------------------------------------------------*/
 int 
-mtcp_init(char *config_file)
+mtcp_init(char * config_file)
 {
 	int i;
 	int ret;
@@ -1650,6 +1717,9 @@ mtcp_init(char *config_file)
 	if (geteuid()) {
 		TRACE_CONFIG("[CAUTION] Run as root if mlock is necessary.\n");
 	}
+
+	// TODO: merging point: it seems this is harmless for the purposes of
+	// DPDK integration. keep it
 
 	/* getting cpu and NIC */
 	num_cpus = GetNumCPUs();
@@ -1660,19 +1730,59 @@ mtcp_init(char *config_file)
 		sigint_cnt[i] = 0;
 	}
 
-	num_devices = ps_list_devices(devices);
+	// TODO: merging point: DPDK-related initializations at this point
+
+	// 1) initialize DPDK logging
+	rte_set_log_level(RTE_LOG_WARNING);
+
+	// 2) initialize DPDK's EAL library
+	ret = rte_eal_init(argc, argv);
+
+	if (ret < 0) {
+		rte_exit(EXIT_FAILURE, "Invalid EAL arguments\n");
+	}
+
+	// TODO: make sure you handle DPDK's calling args in a correct way.
+//	argc -= ret;
+//	argv += ret;
+
+	// 3) create mTCP's mbuf pool
+	// XXX: is this the right place to call rte_mempool_create()? should we
+	// create separate RX and TX mbuf pools?
+	mtcp_pktmbuf_pool =
+		rte_mempool_create("mbuf_pool", NB_MBUF,
+				   MBUF_SIZE, 32,
+				   sizeof(struct rte_pktmbuf_pool_private),
+				   rte_pktmbuf_pool_init, NULL,
+				   rte_pktmbuf_init, NULL,
+				   rte_socket_id(), 0);
+
+	if (mtcp_pktmbuf_pool == NULL)
+		rte_exit(EXIT_FAILURE, "Cannot init mbuf pool\n");
+
+	// TODO: merging point: call rte_eth_dev_count() here instead of
+	// ps_list_devices()
+	//num_devices = ps_list_devices(devices);
+	num_devices = rte_eth_dev_count();
 	if (num_devices == -1) {
-		perror("ps_list_devices");
+		//perror("ps_list_devices");
+		perror("rte_eth_dev_count");
 		return -1;
 	}
 
+	// TODO: merging point: modify SetInterfaceInfo() to accound with
+	// DPDK-style eth device info initialization (e.g. using functions such as
+	// rte_eth_dev_info_get() or rte_eth_macaddr_get().
 	ret = SetInterfaceInfo();
 	if (ret) {
 		TRACE_CONFIG("Error occured while setting interface configuration.\n");
 		return -1;
 	}
 
+	// TODO: merging point: it seems this is harmless for the purposes of
+	// DPDK integration. keep it.
 	ret = LoadConfiguration(config_file);
+
 	if (ret) {
 		TRACE_CONFIG("Error occured while loading configuration.\n");
 		return -1;
@@ -1681,11 +1791,11 @@ mtcp_init(char *config_file)
 
 	/* TODO: this should be fixed */
 	ap = CreateAddressPool(CONFIG.eths[0].ip_addr, 1);
+
 	if (!ap) {
 		TRACE_CONFIG("Error occured while creating address pool.\n");
 		return -1;
 	}
-	
 	PrintInterfaceInfo();
 
 	ret = SetRoutingTable();
