@@ -1,3 +1,6 @@
 [submodule "lib/dpdk"]
 	path = lib/dpdk
 	url = http://dpdk.org/git/dpdk
+[submodule "lib/mtcp"]
+	path = lib/mtcp
+	url = https://github.com/eunyoung14/mtcp.git
