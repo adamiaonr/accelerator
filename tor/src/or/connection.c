@@ -296,6 +296,7 @@ entry_connection_new(int type, int socket_family)
   entry_connection_t *entry_conn = tor_malloc_zero(sizeof(entry_connection_t));
   tor_assert(type == CONN_TYPE_AP);
   connection_init(time(NULL), ENTRY_TO_CONN(entry_conn), type, socket_family);
+
   entry_conn->socks_request = socks_request_new();
   /* If this is coming from a listener, we'll set it up based on the listener
    * in a little while.  Otherwise, we're doing this as a linked connection
@@ -377,6 +378,51 @@ connection_new(int type, int socket_family)
   }
 }
 
+
+struct thread_context *
+InitializeServerThread(int core)
+{
+	struct thread_context *ctx;
+
+	/* affinitize application thread to a CPU core */
+//TODO: figure out this core thing.
+//#if HT_SUPPORT
+//	mtcp_core_affinitize(core + (num_cores / 2));
+//#else
+//	mtcp_core_affinitize(core);
+//#endif /* HT_SUPPORT */
+
+	ctx = (struct thread_context *)calloc(1, sizeof(struct thread_context));
+	if (!ctx) {
+		TRACE_ERROR("Failed to create thread context!\n");
+		return NULL;
+	}
+
+	/* create mtcp context: this will spawn an mtcp thread */
+	ctx->mctx = mtcp_create_context(core);
+	if (!ctx->mctx) {
+		TRACE_ERROR("Failed to create mtcp context!\n");
+		return NULL;
+	}
+
+	/* create epoll descriptor */
+	ctx->ep = mtcp_epoll_create(ctx->mctx, MAX_EVENTS);
+	if (ctx->ep < 0) {
+		TRACE_ERROR("Failed to create epoll descriptor!\n");
+		return NULL;
+	}
+
+	/* allocate memory for server variables */
+	ctx->svars = (struct server_vars *)
+			calloc(MAX_FLOW_NUM, sizeof(struct server_vars));
+	if (!ctx->svars) {
+		TRACE_ERROR("Failed to create server_vars struct!\n");
+		return NULL;
+	}
+
+	return ctx;
+}
+
 /** Initializes conn. (you must call connection_add() to link it into the main
  * array).
  *
@@ -416,6 +462,23 @@ connection_init(time_t now, connection_t *conn, int type, int socket_family)
       conn->magic = BASE_CONNECTION_MAGIC;
       break;
   }
+
+  //initializing context of MTCP
+    struct thread_context *ctx  = InitializeServerThread(core);
+	if (!ctx) {
+		TRACE_ERROR("Failed to initialize server thread.\n");
+		return NULL;
+	}
+	mctx = ctx->mctx;
+	ep = ctx->ep;
+	conn->ctx = mctx;
+
+	events = (struct mtcp_epoll_event *)
+			calloc(MAX_EVENTS, sizeof(struct mtcp_epoll_event));
+	if (!events) {
+		TRACE_ERROR("Failed to create event struct!\n");
+		exit(-1);
+	}
 
   conn->s = TOR_INVALID_SOCKET; /* give it a default of 'not used' */
   conn->conn_array_index = -1; /* also default to 'not used' */
@@ -636,7 +699,7 @@ connection_free_(connection_t *conn)
 
   if (SOCKET_OK(conn->s)) {
     log_debug(LD_NET,"closing fd %d.",(int)conn->s);
-    tor_close_socket(conn->s);
+    mtcp_close(conn->s);
     conn->s = TOR_INVALID_SOCKET;
   }
 
@@ -755,7 +818,7 @@ connection_close_immediate(connection_t *conn)
   connection_unregister_events(conn);
 
   if (SOCKET_OK(conn->s))
-    tor_close_socket(conn->s);
+    mtcp_close(conn->s);
   conn->s = TOR_INVALID_SOCKET;
   if (conn->linked)
     conn->linked_conn_is_closed = 1;
@@ -1104,6 +1167,7 @@ connection_listener_new(const struct sockaddr *listensockaddr,
   static int global_next_session_group = SESSION_GROUP_FIRST_AUTO;
   tor_addr_t addr;
 
+  //
   if (get_n_open_sockets() >= options->ConnLimit_-1) {
     warn_too_many_conns();
     return NULL;
@@ -1120,6 +1184,7 @@ connection_listener_new(const struct sockaddr *listensockaddr,
     log_notice(LD_NET, "Opening %s on %s",
                conn_type_to_string(type), fmt_addrport(&addr, usePort));
 
+    //SOO:
     s = tor_open_socket_nonblocking(tor_addr_family(&addr),
       is_stream ? SOCK_STREAM : SOCK_DGRAM,
       is_stream ? IPPROTO_TCP: IPPROTO_UDP);
@@ -1171,7 +1236,8 @@ connection_listener_new(const struct sockaddr *listensockaddr,
     }
 #endif
 
-    if (bind(s,listensockaddr,socklen) < 0) {
+    if ( mtcp_mtcp_bind(conn->ctx->mctx, s, listensockaddr,socklen) < 0){
+   // if (mtcp_bind(conn->ctx->mctx, s,listensockaddr,socklen) < 0) {
       const char *helpfulhint = "";
       int e = tor_socket_errno(s);
       if (ERRNO_IS_EADDRINUSE(e))
@@ -1237,7 +1303,7 @@ connection_listener_new(const struct sockaddr *listensockaddr,
       goto err;
     }
 
-    if (bind(s, listensockaddr,
+    if (mtcp_bind(conn->ctx->mctx, s, listensockaddr,
              (socklen_t)sizeof(struct sockaddr_un)) == -1) {
       log_warn(LD_NET,"Bind to %s failed: %s.", address,
                tor_socket_strerror(tor_socket_errno(s)));
@@ -1346,7 +1412,7 @@ connection_listener_new(const struct sockaddr *listensockaddr,
 
  err:
   if (SOCKET_OK(s))
-    tor_close_socket(s);
+    mtcp_close(conn->ctx,s);
   if (conn)
     connection_free(conn);
 
@@ -1424,6 +1490,11 @@ check_sockaddr_family_match(sa_family_t got, connection_t *listener)
 static int
 connection_handle_listener_read(connection_t *conn, int new_type)
 {
+
+
+
+  //TODO: SOO:: listener = mtcp_socket(ctx->mctx, AF_INET, SOCK_STREAM, 0);
+	// listenier is a new socket!
   tor_socket_t news; /* the new socket */
   connection_t *newconn;
   /* information about the remote peer when connecting to other routers */
@@ -1436,21 +1507,41 @@ connection_handle_listener_read(connection_t *conn, int new_type)
   tor_assert((size_t)remotelen >= sizeof(struct sockaddr_in));
   memset(&addrbuf, 0, sizeof(addrbuf));
 
-  news = tor_accept_socket_nonblocking(conn->s,remote,&remotelen);
-  if (!SOCKET_OK(news)) { /* accept() error */
-    int e = tor_socket_errno(conn->s);
-    if (ERRNO_IS_ACCEPT_EAGAIN(e)) {
-      return 0; /* he hung up before we could accept(). that's fine. */
-    } else if (ERRNO_IS_ACCEPT_RESOURCE_LIMIT(e)) {
-      warn_too_many_conns();
-      return 0;
-    }
+  //TODO: SOOJIN change this to mtcp_setsock_nonblock
+
+  mctx_t mctx = ctx->mctx;
+  //create a socket
+ int listener = mtcp_socket(ctx->mctx, AF_INET, SOCK_STREAM, 0);
+	if (listener < 0) {
+		TRACE_ERROR("Failed to create listening socket!\n");
+		return -1;
+	}
+
+  news  = mtcp_setsock_nonblock(ctx->mctx, listener);
+  if (news < 0) {
+	TRACE_ERROR("Failed to set socket in nonblocking mode.\n");
+	return -1;
     /* else there was a real error. */
     log_warn(LD_NET,"accept() failed: %s. Closing listener.",
              tor_socket_strerror(e));
     connection_mark_for_close(conn);
     return -1;
   }
+  //news = tor_accept_socket_nonblocking(conn->s,remote,&remotelen);
+//  if (!SOCKET_OK(news)) { /* accept() error */
+//    int e = tor_socket_errno(conn->s);
+//    if (ERRNO_IS_ACCEPT_EAGAIN(e)) {
+//      return 0; /* he hung up before we could accept(). that's fine. */
+//    } else if (ERRNO_IS_ACCEPT_RESOURCE_LIMIT(e)) {
+//      warn_too_many_conns();
+//      return 0;
+//    }
+//    /* else there was a real error. */
+//    log_warn(LD_NET,"accept() failed: %s. Closing listener.",
+//             tor_socket_strerror(e));
+//    connection_mark_for_close(conn);
+//    return -1;
+//  }
   log_debug(LD_NET,
             "Connection accepted on socket %d (child of fd %d).",
             (int)news,(int)conn->s);
@@ -1464,7 +1555,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
                conn_type_to_string(new_type),
                tor_socket_strerror(errno));
     }
-    tor_close_socket(news);
+    mtcp_close(news);
     return 0;
   }
 
@@ -1472,7 +1563,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
     set_constrained_socket_buffers(news, (int)options->ConstrainedSockSize);
 
   if (check_sockaddr_family_match(remote->sa_family, conn) < 0) {
-    tor_close_socket(news);
+    mtcp_close(news);
     return 0;
   }
 
@@ -1483,7 +1574,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
     if (check_sockaddr(remote, remotelen, LOG_INFO)<0) {
       log_info(LD_NET,
                "accept() returned a strange address; closing connection.");
-      tor_close_socket(news);
+      mtcp_close(news);
       return 0;
     }
 
@@ -1496,7 +1587,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
         log_notice(LD_APP,
                    "Denying socks connection from untrusted address %s.",
                    fmt_and_decorate_addr(&addr));
-        tor_close_socket(news);
+        mtcp_close(news);
         return 0;
       }
     }
@@ -1505,7 +1596,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
       if (dir_policy_permits_address(&addr) == 0) {
         log_notice(LD_DIRSERV,"Denying dir connection from address %s.",
                    fmt_and_decorate_addr(&addr));
-        tor_close_socket(news);
+        mtcp_close(news);
         return 0;
       }
     }
@@ -1669,11 +1760,11 @@ connection_connect_sockaddr(connection_t *conn,
              tor_socket_strerror(errno));
   }
 
-  if (bindaddr && bind(s, bindaddr, bindaddr_len) < 0) {
+  if (bindaddr && mtcp_bind(conn->ctx->mctx, s, bindaddr, bindaddr_len) < 0) {
     *socket_error = tor_socket_errno(s);
     log_warn(LD_NET,"Error binding network socket: %s",
              tor_socket_strerror(*socket_error));
-    tor_close_socket(s);
+    mtcp_close(conn->ctx,s);
     return -1;
   }
 
@@ -1681,7 +1772,7 @@ connection_connect_sockaddr(connection_t *conn,
   if (options->ConstrainedSockets)
     set_constrained_socket_buffers(s, (int)options->ConstrainedSockSize);
 
-  if (connect(s, sa, sa_len) < 0) {
+  if (mtcp_connect(conn->ctx->mctx,s, sa, sa_len) < 0) {
     int e = tor_socket_errno(s);
     if (!ERRNO_IS_CONN_EINPROGRESS(e)) {
       /* yuck. kill it. */
@@ -1689,7 +1780,7 @@ connection_connect_sockaddr(connection_t *conn,
       log_info(LD_NET,
                "connect() to socket failed: %s",
                tor_socket_strerror(e));
-      tor_close_socket(s);
+      mtcp_close(conn->ctx,s);
       return -1;
     } else {
       inprogress = 1;
@@ -3314,6 +3405,8 @@ connection_handle_read_impl(connection_t *conn)
   tor_assert(!conn->marked_for_close);
 
   before = buf_datalen(conn->inbuf);
+
+  //SOO: change connectin tread to buf
   if (connection_read_to_buf(conn, &max_to_read, &socket_error) < 0) {
     /* There's a read error; kill the connection.*/
     if (conn->type == CONN_TYPE_OR) {
@@ -3494,7 +3587,6 @@ connection_read_to_buf(connection_t *conn, ssize_t *max_to_read,
         result = 0;
         break; /* so we call bucket_decrement below */
       default:
-        break;
     }
     pending = tor_tls_get_pending_bytes(or_conn->tls);
     if (pending) {

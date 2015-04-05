@@ -58,6 +58,11 @@
 #include "status.h"
 #include "util_process.h"
 #include "ext_orport.h"
+
+
+#include <mtcp_api.h>
+#include <mtcp_epoll.h>
+
 #ifdef USE_DMALLOC
 #include <dmalloc.h>
 #include <openssl/crypto.h>

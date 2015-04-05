@@ -22,6 +22,8 @@
 #include "ext_orport.h"
 #include "../common/util.h"
 #include "../common/torlog.h"
+//#include "../../../lib/mtcp/mtcp/src/include/mtcp_api.h"
+
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
 #endif
@@ -475,6 +477,8 @@ read_to_chunk(buf_t *buf, chunk_t *chunk, tor_socket_t fd, size_t at_most,
   ssize_t read_result;
   if (at_most > CHUNK_REMAINING_CAPACITY(chunk))
     at_most = CHUNK_REMAINING_CAPACITY(chunk);
+
+  //TODO: this is there csocket receives data
   read_result = tor_socket_recv(fd, CHUNK_WRITE_PTR(chunk), at_most, 0);
 
   if (read_result < 0) {
@@ -635,6 +639,8 @@ flush_chunk(tor_socket_t s, buf_t *buf, chunk_t *chunk, size_t sz,
 
   if (sz > chunk->datalen)
     sz = chunk->datalen;
+
+  //TODO:
   write_result = tor_socket_send(s, chunk->data, sz, 0);
 
   if (write_result < 0) {
