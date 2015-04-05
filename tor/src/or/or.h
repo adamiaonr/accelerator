@@ -1301,6 +1301,10 @@ typedef struct connection_t {
   /** Bytes written since last call to control_event_conn_bandwidth_used().
    * Only used if we're configured to emit CONN_BW events. */
   uint32_t n_written_conn_bw;
+
+  /* Context info for mTCP */
+  struct thread_context *ctx;
+
 } connection_t;
 
 /** Subtype of connection_t; used for a listener socket. */
