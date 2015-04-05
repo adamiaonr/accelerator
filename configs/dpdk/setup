@@ -8,7 +8,7 @@
 
 #!/bin/bash
 
-DPDK=/home/clockwatcher/workbench/accelerator/lib/dpdk
+DPDK=/home/clockwatcher/workbench/accelerator/lib/mtcp/dpdk-1.8.0
 DPDK_RTE_TARGET=$DPDK/i686-native-linuxapp-gcc
 DPDK_NIC_BIND_TOOL=$DPDK/tools/dpdk_nic_bind.py
 
