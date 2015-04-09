@@ -11,20 +11,21 @@
 
 #!/bin/bash
 MTCP_CONFIGS=/home/clockwatcher/workbench/accelerator/configs/mtcp
-
 MTCP_HOME=/home/clockwatcher/workbench/accelerator/lib/mtcp
-
 MTCP_DPDK=$MTCP_HOME/dpdk-1.8.0
 MTCP_DPDK_RTE_TARGET=$MTCP_DPDK/i686-native-linuxapp-gcc
 MTCP_DPDK_NIC_BIND_TOOL=$MTCP_DPDK/tools/dpdk_nic_bind.py
 MTCP_DPDK_BUILD_CONFIG=config
 
 usage () {
-    echo "usage: sudo ./setup.sh [[-n value OR --nr_hugepages value] [-k or --install-kni] | [-h]]"
+    echo "usage: sudo ./setup.sh [[-n value OR --nr_hugepages value] [-d OR --build_dpdk] [-m OR --build_mtcp] ] | [-h]]"
 }
 
 HUGETLBFS_DIR="/mnt/huge"
 HUGETLBFS_NR=320
+
+BUILD_DPDK=0
+BUILD_MTCP=0
 
 while [ "$1" != "" ]; do
     
@@ -33,7 +34,9 @@ while [ "$1" != "" ]; do
         -n | --nr_hugepages )   shift
                                 HUGETLBFS_NR=$1
                                 ;;
-        -k | --install-kni )   	insmod $DPDK_RTE_TARGET/kmod/rte_kni.ko
+        -d | --build_dpdk )     BUILD_DPDK=1
+                                ;;
+        -m | --build_mtcp )     BUILD_MTCP=1
                                 ;;
         -h | --help	)			usage
         						exit
@@ -47,40 +50,52 @@ done
 
 # 1) pre-requesites
 
-# 1.1) 
+# 1.1) check the linux kernel version (should be 3.13.0-46-lowlatency)
+
+# 1.2) install necessary libs
+sudo apt-get update
+sudo apt-get install libnuma-dev build-essential linux-image-3.13.0-46-lowlatency linux-headers-3.13.0-46-lowlatency libevent-dev 
+
+# 1.3) check that the accelerator directories exist
+
+# 1.3.1) if the mTCP submodules aren't initialized, do it now
 
 # 2) setup DPDK for i686 target (32 bit), w/ debugging activated
 cd $MTCP_DPDK
 
-# 2.1) make sure previous installations are cleaneds
-make clean
-make uninstall
+if [ $BUILD_DPDK -eq 1 ]; then
+    # 2.1) make sure previous installations are cleaneds
+    make clean
+    sudo make uninstall
 
-# 2.2) configure the DPDK build for the target i686 arch + activate debugging
-make config T=i686-native-linuxapp-gcc
-cp -r $MTCP_CONFIGS/files/$MTCP_DPDK_BUILD_CONFIG/* $MTCP_DPDK/$MTCP_DPDK_BUILD_CONFIG/
-make
+    # 2.2) configure the DPDK build for the target i686 arch + activate debugging
+    cp -r $MTCP_CONFIGS/files/$MTCP_DPDK_BUILD_CONFIG/* $MTCP_DPDK/$MTCP_DPDK_BUILD_CONFIG/
+    make config T=i686-native-linuxapp-gcc
+
+    make
+    sudo make install T=i686-native-linuxapp-gcc
+fi
 
 # 2.3) load dpdk's specialized kernel module to allow userspace apps to control 
 # the network card
-modprobe uio
-insmod $DPDK_RTE_TARGET/kmod/igb_uio.ko
+sudo modprobe uio
+sudo insmod $MTCP_DPDK_RTE_TARGET/kmod/igb_uio.ko
 
 # 2.4) mount hugetlbfs (still not entirely sure why this is necessary... 
 # apparently to reserve huge pages memory for dpdk...)
 
 # 2.4.1) 
-sysctl -w vm.nr_hugepages=$HUGETLBFS_NR
-sysctl vm.nr_hugepages
+sudo sysctl -w vm.nr_hugepages=$HUGETLBFS_NR
+sudo sysctl vm.nr_hugepages
 
 # 2.4.2) 
 if [ ! -d "$HUGETLBFS_DIR" ]; then
     
-    mkdir -p $HUGETLBFS_DIR
+    sudo mkdir -p $HUGETLBFS_DIR
 fi
 
 # 2.4.3) 
-mount -t hugetlbfs hugetlbfs $HUGETLBFS_DIR
+sudo mount -t hugetlbfs hugetlbfs $HUGETLBFS_DIR
 
 # 2.5) bind eth0 and eth1 ifaces to dpdk
 
@@ -89,39 +104,43 @@ mount -t hugetlbfs hugetlbfs $HUGETLBFS_DIR
 $MTCP_DPDK_NIC_BIND_TOOL --status
 
 # 2.5.2) --force the --bind of eth0 and eth1 ifaces to dpdk's igb_uio driver
-$MTCP_DPDK_NIC_BIND_TOOL --force --bind=igb_uio eth0
-$MTCP_DPDK_NIC_BIND_TOOL --force --bind=igb_uio eth1
+sudo $MTCP_DPDK_NIC_BIND_TOOL --force --bind=igb_uio eth0
+sudo $MTCP_DPDK_NIC_BIND_TOOL --force --bind=igb_uio eth1
 
 # 2.5.3) show new status of iface bindings
 $MTCP_DPDK_NIC_BIND_TOOL --status
 
 # 2.5.4) bring the dpdk-registered interfaces up
-$MTCP_DPDK/tools/setup_iface_single_process.sh 1
+sudo $MTCP_DPDK/tools/setup_iface_single_process.sh 1
 
 # 2.6) soft links for include/ and lib/ directories inside empty dpdk/ directory
 cd $MTCP_HOME/dpdk 
-ln -s $MTCP_DPDK_RTE_TARGET/lib lib
-ln -s $MTCP_DPDK_RTE_TARGET/include include
+sudo ln -s $MTCP_DPDK_RTE_TARGET/lib lib
+sudo ln -s $MTCP_DPDK_RTE_TARGET/include include
 
 # 3) setup mTCP lib
+cd $MTCP_HOME
 
 # 3.1) ./configure
-./configure --with-dpdk-lib=$MTCP_HOME/dpdk
+if [ $BUILD_MTCP -eq 1 ]; then
 
-# 3.2) copy patched makefiles (basically, for compilation of mTCP in i686, 
-# 32 bit)
-cp $MTCP_CONFIGS/files/Makefile.src $MTCP_HOME/src/Makefile
-cp $MTCP_CONFIGS/files/Makefile.util $MTCP_HOME/util/Makefile
-cp $MTCP_CONFIGS/files/Makefile.example $MTCP_HOME/apps/example/Makefile
+    ./configure --with-dpdk-lib=$MTCP_HOME/dpdk
 
-# 3.3) compile mTCP
-cd $MTCP_HOME/src
-make
+    # 3.2) copy patched makefiles (basically, for compilation of mTCP in i686, 
+    # 32 bit)
+    cp $MTCP_CONFIGS/files/Makefile.src $MTCP_HOME/mtcp/src/Makefile
+    cp $MTCP_CONFIGS/files/Makefile.util $MTCP_HOME/util/Makefile
+    cp $MTCP_CONFIGS/files/Makefile.example $MTCP_HOME/apps/example/Makefile
 
-cd $MTCP_HOME/util
-make
+    # 3.3) compile mTCP
+    cd $MTCP_HOME/mtcp/src
+    make
 
-cd $MTCP_HOME/apps/example
-make
+    cd $MTCP_HOME/util
+    make
+
+    cd $MTCP_HOME/apps/example
+    make
+fi
 
 exit 0
