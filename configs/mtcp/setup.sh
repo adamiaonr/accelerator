@@ -69,7 +69,7 @@ if [ $BUILD_DPDK -eq 1 ]; then
     sudo make uninstall
 
     # 2.2) configure the DPDK build for the target i686 arch + activate debugging
-    cp -r $MTCP_CONFIGS/files/$MTCP_DPDK_BUILD_CONFIG/* $MTCP_DPDK/$MTCP_DPDK_BUILD_CONFIG/
+    cp -r $MTCP_CONFIGS/files/dpdk-1.8.0/$MTCP_DPDK_BUILD_CONFIG/* $MTCP_DPDK/$MTCP_DPDK_BUILD_CONFIG/
     make config T=i686-native-linuxapp-gcc
 
     make
@@ -128,9 +128,10 @@ if [ $BUILD_MTCP -eq 1 ]; then
 
     # 3.2) copy patched makefiles (basically, for compilation of mTCP in i686, 
     # 32 bit)
-    cp $MTCP_CONFIGS/files/Makefile.src $MTCP_HOME/mtcp/src/Makefile
-    cp $MTCP_CONFIGS/files/Makefile.util $MTCP_HOME/util/Makefile
-    cp $MTCP_CONFIGS/files/Makefile.example $MTCP_HOME/apps/example/Makefile
+    cp $MTCP_CONFIGS/files/mtcp/src/Makefile.src $MTCP_HOME/mtcp/src/Makefile
+    cp $MTCP_CONFIGS/files/mtcp/src/dpdk_module.c $MTCP_HOME/mtcp/src/
+    cp $MTCP_CONFIGS/files/util/Makefile.util $MTCP_HOME/util/Makefile
+    cp $MTCP_CONFIGS/files/apps/example/Makefile.example $MTCP_HOME/apps/example/Makefile
 
     # 3.3) compile mTCP
     cd $MTCP_HOME/mtcp/src
