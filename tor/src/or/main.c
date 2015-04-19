@@ -58,7 +58,6 @@
 #include "status.h"
 #include "util_process.h"
 #include "ext_orport.h"
-
 #ifdef USE_DMALLOC
 #include <dmalloc.h>
 #include <openssl/crypto.h>
@@ -98,6 +97,27 @@ static void second_elapsed_callback(periodic_timer_t *timer, void *args);
 static int conn_close_if_marked(int i);
 static void connection_start_reading_from_linked_conn(connection_t *conn);
 static int connection_should_read_from_linked_conn(connection_t *conn);
+
+// XXX: mTCP changes: mTCP variables which shall be initialized here and
+// passed all over the place (mostly to connection objects).
+/********** mTCP VARIABLES **********/
+#ifdef USE_MTCP
+#include <mtcp_api.h>
+#include <mtcp_epoll.h>
+
+// xxx: mTCP changes: not sure about what these are for...
+#define MAX_FLOW_NUM  (10000)
+#define MAX_EVENTS (MAX_FLOW_NUM * 3)
+
+struct thread_context
+{
+	mctx_t mctx;
+	int ep;
+	//struct server_vars *svars;
+};
+
+struct thread_context * mtcp_thread_ctx;
+#endif
 
 /********* START VARIABLES **********/
 
@@ -2422,6 +2442,89 @@ handle_signals(int is_parent)
 #endif /* signal stuff */
 }
 
+#ifdef USE_MTCP
+
+/** handles mTCP initializations
+ *
+ *	handles mTCP initializations:
+ *		-# initializes mTCP (w/ an hardcoded config file)
+ *		-# initializes a 'thread_context' for tor (this follows the procedure
+ *			used in mTCP's apps/example/epserver.c). this context is saved in
+ *			a global var named 'mtcp_thread_ctx'
+ *		-# initializes an mTCP context and mTCP epoll() descriptor
+ *
+ *	returns -1 if anything fails, 1 if successful
+ */
+int tor_mtcp_init() {
+
+	// initialize mTCP as a whole with configs custom made for tor
+	// FIXME: still not sure where this file should be loaded from...
+	int ret = mtcp_init("tor-mtcp.conf");
+
+	if (ret) {
+		//TRACE_ERROR("Failed to initialize mtcp\n");
+		log_err(LD_GENERAL, "(tor + mTCP): failed to initialize mtcp\n");
+		//exit(EXIT_FAILURE);
+		return -1;
+	}
+
+	/* register signal handler to mtcp */
+	// FIXME: will register tor's own signal handler, not sure if
+	// this is correct...
+	//mtcp_register_signal(SIGINT, SignalHandler);
+	mtcp_register_signal(SIGINT, process_signal);
+
+	//TRACE_INFO("Application initialization finished.\n");
+	log_info(LD_GENERAL, "(tor + mTCP): application initialization finished.\n");
+
+	// FIXME: we assume tor runs on a single (1) thread, and that we only need
+	// 1 core, with index 0
+	num_cores = 1;
+	core = 0;
+
+	/* affinitize application thread to a CPU core */
+#if HT_SUPPORT
+	mtcp_core_affinitize(core + (num_cores / 2));
+#else
+	mtcp_core_affinitize(core);
+#endif /* HT_SUPPORT */
+
+	// initialize tor's thread_context struct
+	// XXX: we're sticking to mTCP's apps/example/epserver.c example
+	mtcp_thread_ctx =
+			(struct thread_context *) calloc(1, sizeof(struct thread_context));
+
+	if (!mtcp_thread_ctx) {
+		//TRACE_ERROR("Failed to create thread context!\n");
+		//return NULL;
+		log_err(LD_GENERAL, "(tor + mTCP): failed to create thread context!\n");
+		return -1;
+	}
+
+	/* create mtcp context: this will spawn an mtcp thread */
+	mtcp_thread_ctx->mctx = mtcp_create_context(core);
+
+	if (!mtcp_thread_ctx->mctx) {
+		//TRACE_ERROR("Failed to create mtcp context!\n");
+		//return NULL;
+		log_err(LD_GENERAL, "(tor + mTCP): failed to create mtcp context!\n");
+		return -1;
+	}
+
+	/* create mtcp epoll descriptor */
+	mtcp_thread_ctx->ep = mtcp_epoll_create(mtcp_thread_ctx->mctx, MAX_EVENTS);
+
+	if (mtcp_thread_ctx < 0) {
+		//TRACE_ERROR("Failed to create epoll descriptor!\n");
+		//return NULL;
+		log_err(LD_GENERAL, "(tor + mTCP): failed to create epoll descriptor!\n");
+		return -1;
+	}
+
+	return 1;
+}
+#endif
+
 /** Main entry point for the Tor command-line client.
  */
 int
@@ -3034,6 +3137,16 @@ tor_main(int argc, char *argv[])
                            "SetProcessDEPPolicy");
     if (setdeppolicy) setdeppolicy(1); /* PROCESS_DEP_ENABLE */
   }
+#endif
+
+// XXX: mTCP changes: initialize mTCP here
+#ifdef USE_MTCP
+
+	if (tor_mtcp_init() < 0) {
+		log_err(LD_GENERAL, "(tor + mTCP): mTCP initialization failed\n");
+		return -1;
+	}
+
 #endif
 
   configure_backtrace_handler(get_version());
