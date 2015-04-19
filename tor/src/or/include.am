@@ -23,6 +23,19 @@ else
 evdns_source=src/ext/eventdns.c
 endif
 
+# XXX: mTCP additions
+# mtcp library and header 
+# FIXME: MTCP_FLD is hardcoded: this is bad and should be changed
+MTCP_FLD    =/home/clockwatcher/workbench/accelerator/lib/mtcp
+MTCP_INC    =-I${MTCP_FLD}/mtcp/include
+MTCP_LIB    =-L${MTCP_FLD}/mtcp/lib
+MTCP_TARGET = ${MTCP_LIB}/libmtcp.a
+
+# XXX: mTCP additions
+# dpdk inc (as in mtcp examples)
+DPDK_INC=${MTCP_FLD}/dpdk/include
+DPDK_LIB=${MTCP_FLD}/dpdk/lib
+
 LIBTOR_A_SOURCES = \
 	src/or/addressmap.c				\
 	src/or/buffers.c				\
@@ -48,7 +61,7 @@ LIBTOR_A_SOURCES = \
 	src/or/dirvote.c				\
 	src/or/dns.c					\
 	src/or/dnsserv.c				\
-        src/or/fp_pair.c				\
+	src/or/fp_pair.c				\
 	src/or/geoip.c					\
 	src/or/entrynodes.c				\
 	src/or/ext_orport.c				\
@@ -88,9 +101,15 @@ src_or_libtor_testing_a_SOURCES = $(LIBTOR_A_SOURCES)
 #libtor_a_LIBADD = ../common/libor.a ../common/libor-crypto.a \
 #	../common/libor-event.a
 
-
 src_or_tor_SOURCES = src/or/tor_main.c
 AM_CPPFLAGS += -I$(srcdir)/src/or -Isrc/or
+
+# XXX: mTCP additions
+AM_CPPFLAGS += ${MTCP_INC} -DENABLE_DPDK -DRTE_MACHINE_CPUFLAG_SSE -DRTE_MACHINE_CPUFLAG_SSE2 -DRTE_MACHINE_CPUFLAG_SSE3 \
+        -DRTE_MACHINE_CPUFLAG_SSSE3 -DRTE_MACHINE_CPUFLAG_SSE4_1 -DRTE_MACHINE_CPUFLAG_SSE4_2 \
+        -DRTE_MACHINE_CPUFLAG_AES -DRTE_MACHINE_CPUFLAG_PCLMULQDQ -DRTE_MACHINE_CPUFLAG_AVX \
+        -DRTE_COMPILE_TIME_CPUFLAGS=RTE_CPUFLAG_SSE,RTE_CPUFLAG_SSE2,RTE_CPUFLAG_SSE3,RTE_CPUFLAG_SSSE3,RTE_CPUFLAG_SSE4_1,RTE_CPUFLAG_SSE4_2,RTE_CPUFLAG_AES,RTE_CPUFLAG_PCLMULQDQ,RTE_CPUFLAG_AVX -I${DPDK_INC} \
+        -include ${DPDK_INC}/rte_config.h
 
 src/or/tor_main.o: micro-revision.i
 
@@ -105,13 +124,23 @@ src_or_libtor_testing_a_CFLAGS = $(AM_CFLAGS) $(TEST_CFLAGS)
 # This seems to matter nowhere but on windows, but I assure you that it
 # matters a lot there, and is quite hard to debug if you forget to do it.
 
-
 src_or_tor_LDFLAGS = @TOR_LDFLAGS_zlib@ @TOR_LDFLAGS_openssl@ @TOR_LDFLAGS_libevent@
+
+# XXX: mTCP additions
+src_or_tor_LDFLAGS += ${MTCP_LIB} -L${DPDK_LIB}
+
+# XXX: mTCP additions
+LDFLAGS += ${MTCP_LIB} -L${DPDK_LIB} 
+
 src_or_tor_LDADD = src/or/libtor.a src/common/libor.a \
 	src/common/libor-crypto.a $(LIBDONNA) \
 	src/common/libor-event.a \
 	@TOR_ZLIB_LIBS@ @TOR_LIB_MATH@ @TOR_LIBEVENT_LIBS@ @TOR_OPENSSL_LIBS@ \
 	@TOR_LIB_WS32@ @TOR_LIB_GDI@ @CURVE25519_LIBS@ @TOR_SYSTEMD_LIBS@
+
+# XXX: mTCP additions
+# FIXME: following similar instructions to those in lib/mtcp/apps/examples
+LIBS += -m32 -pthread -lrt -march=native -Wl,-export-dynamic ${MTCP_FLD}/mtcp/lib/libmtcp.a -L${DPDK_LIB} -Wl,-lnuma -Wl,-lmtcp -Wl,-lpthread -Wl,-lrt -Wl,-ldl -Wl,--whole-archive -Wl,-lrte_distributor -Wl,-lrte_pipeline -Wl,-lrte_table -Wl,-lrte_port -Wl,-lrte_timer -Wl,-lrte_hash -Wl,-lrte_lpm -Wl,-lrte_power -Wl,-lrte_acl -Wl,-lrte_meter -Wl,-lrte_sched -Wl,-lm -Wl,-lrt -Wl,--start-group -Wl,-lrte_kvargs -Wl,-lrte_mbuf -Wl,-lrte_ip_frag -Wl,-lethdev -Wl,-lrte_malloc -Wl,-lrte_mempool -Wl,-lrte_ring -Wl,-lrte_eal -Wl,-lrte_cmdline -Wl,-lrte_cfgfile -Wl,-lrte_pmd_bond -Wl,-lrte_pmd_vmxnet3_uio -Wl,-lrte_pmd_ixgbe -Wl,-lrte_pmd_e1000 -Wl,-lrte_pmd_ring -Wl,-lrt -Wl,-lm -Wl,-ldl -Wl,--end-group -Wl,--no-whole-archive
 
 if COVERAGE_ENABLED
 src_or_tor_cov_SOURCES = src/or/tor_main.c

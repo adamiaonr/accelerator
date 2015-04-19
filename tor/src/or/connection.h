@@ -12,8 +12,45 @@
 #ifndef TOR_CONNECTION_H
 #define TOR_CONNECTION_H
 
+#include "../../../lib/mtcp/mtcp/include/mtcp_api.h"
+#include "../../../lib/mtcp/mtcp/include/mtcp_epoll.h"
+
+#define MAX_FLOW_NUM  (10000)
+
+#define RCVBUF_SIZE (2*1024)
+#define SNDBUF_SIZE (8*1024)
+
+#define MAX_EVENTS (MAX_FLOW_NUM * 3)
+
+#define HTTP_HEADER_LEN 1024
+#define URL_LEN 128
+
+#define MAX_CPUS 16
+#define MAX_FILES 30
+
+#ifndef TRUE
+#define TRUE (1)
+#endif
+
+#ifndef FALSE
+#define FALSE (0)
+#endif
+
+#ifndef ERROR
+#define ERROR (-1)
+#endif
+
+#define HT_SUPPORT FALSE
+
 /* XXXX For buf_datalen in inline function */
 #include "buffers.h"
+
+struct thread_context
+{
+        mctx_t mctx;
+        int ep;
+        struct server_vars *svars;
+};
 
 const char *conn_type_to_string(int type);
 const char *conn_state_to_string(int type, int state);
