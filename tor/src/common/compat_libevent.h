@@ -25,6 +25,16 @@ struct bufferevent_rate_limit_group;
 void configure_libevent_logging(void);
 void suppress_libevent_log_msg(const char *msg);
 
+#ifdef USE_MTCP
+
+struct mtcp_epoll_event * tor_mtcp_event_new(
+		mctx_t mctx,
+		int mtcp_event_pool_id,
+		int options,
+		int listen_sock_fd);
+
+#endif
+
 #ifdef HAVE_EVENT2_EVENT_H
 #define tor_event_new     event_new
 #define tor_evtimer_new   evtimer_new

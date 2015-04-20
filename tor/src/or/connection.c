@@ -61,11 +61,20 @@
 #include <sys/un.h>
 #endif
 
+#ifdef USE_MTCP
+static connection_t * connection_listener_new(
+								struct thread_context * mtcp_thread_ctx,
+								const struct sockaddr *listensockaddr,
+								socklen_t listensocklen, int type,
+								const char *address,
+								const port_cfg_t *portcfg);
+#else
 static connection_t *connection_listener_new(
                                const struct sockaddr *listensockaddr,
                                socklen_t listensocklen, int type,
                                const char *address,
                                const port_cfg_t *portcfg);
+#endif
 static void connection_init(time_t now, connection_t *conn, int type,
                             int socket_family);
 static int connection_init_accepted_conn(connection_t *conn,
@@ -296,7 +305,6 @@ entry_connection_new(int type, int socket_family)
   entry_connection_t *entry_conn = tor_malloc_zero(sizeof(entry_connection_t));
   tor_assert(type == CONN_TYPE_AP);
   connection_init(time(NULL), ENTRY_TO_CONN(entry_conn), type, socket_family);
-
   entry_conn->socks_request = socks_request_new();
   /* If this is coming from a listener, we'll set it up based on the listener
    * in a little while.  Otherwise, we're doing this as a linked connection
@@ -378,43 +386,6 @@ connection_new(int type, int socket_family)
   }
 }
 
-
-struct thread_context *
-InitializeServerThread(int core)
-{
-	struct thread_context *ctx;
-
-	/* affinitize application thread to a CPU core */
-//TODO: figure out this core thing.
-//#if HT_SUPPORT
-//	mtcp_core_affinitize(core + (num_cores / 2));
-//#else
-//	mtcp_core_affinitize(core);
-//#endif /* HT_SUPPORT */
-
-	ctx = (struct thread_context *)calloc(1, sizeof(struct thread_context));
-	if (!ctx) {
-		//TRACE_ERROR("Failed to create thread context!\n");
-		return NULL;
-	}
-
-	/* create mtcp context: this will spawn an mtcp thread */
-	ctx->mctx = mtcp_create_context(core);
-	if (!ctx->mctx) {
-		//TRACE_ERROR("Failed to create mtcp context!\n");
-		return NULL;
-	}
-
-	/* create epoll descriptor */
-	ctx->ep = mtcp_epoll_create(ctx->mctx, MAX_EVENTS);
-	if (ctx->ep < 0) {
-		//TRACE_ERROR("Failed to create epoll descriptor!\n");
-		return NULL;
-	}
-
-	return ctx;
-}
-
 /** Initializes conn. (you must call connection_add() to link it into the main
  * array).
  *
@@ -454,26 +425,6 @@ connection_init(time_t now, connection_t *conn, int type, int socket_family)
       conn->magic = BASE_CONNECTION_MAGIC;
       break;
   }
-
-  //initializing context of MTCP
-    // XXX: we assume tor works only w/ 1 core, so let it be the 
-    // first '0'
-    int core = 0;
-    struct thread_context * ctx  = InitializeServerThread(core);
-	if (!ctx) {
-		//TRACE_ERROR("Failed to initialize server thread.\n");
-		return;
-	}
-	mctx_t mctx = ctx->mctx;
-	//int ep = ctx->ep;
-	conn->ctx->mctx = mctx;
-
-	struct mtcp_epoll_event * events = (struct mtcp_epoll_event *)
-			calloc(MAX_EVENTS, sizeof(struct mtcp_epoll_event));
-	if (!events) {
-		//TRACE_ERROR("Failed to create event struct!\n");
-		exit(-1);
-	}
 
   conn->s = TOR_INVALID_SOCKET; /* give it a default of 'not used' */
   conn->conn_array_index = -1; /* also default to 'not used' */
@@ -694,7 +645,7 @@ connection_free_(connection_t *conn)
 
   if (SOCKET_OK(conn->s)) {
     log_debug(LD_NET,"closing fd %d.",(int)conn->s);
-    mtcp_close(conn->ctx->mctx, conn->s);
+    tor_close_socket(conn->s);
     conn->s = TOR_INVALID_SOCKET;
   }
 
@@ -813,7 +764,7 @@ connection_close_immediate(connection_t *conn)
   connection_unregister_events(conn);
 
   if (SOCKET_OK(conn->s))
-    mtcp_close(conn->ctx->mctx, conn->s);
+    tor_close_socket(conn->s);
   conn->s = TOR_INVALID_SOCKET;
   if (conn->linked)
     conn->linked_conn_is_closed = 1;
@@ -1144,14 +1095,24 @@ tor_listen(tor_socket_t fd)
  * <b>address</b> is only used for logging purposes and to add the information
  * to the conn.
  */
+#ifdef USE_MTCP
+static connection_t *
+connection_listener_new(
+						struct thread_context * mtcp_thread_ctx,
+						const struct sockaddr *listensockaddr,
+                        socklen_t socklen,
+                        int type, const char *address,
+                        const port_cfg_t *port_cfg)
+#else
 static connection_t *
 connection_listener_new(const struct sockaddr *listensockaddr,
                         socklen_t socklen,
                         int type, const char *address,
                         const port_cfg_t *port_cfg)
+#endif
 {
-  listener_connection_t *lis_conn;
-  connection_t *conn = NULL;
+  listener_connection_t * lis_conn;
+  connection_t * conn = NULL;
   tor_socket_t s = TOR_INVALID_SOCKET;  /* the socket we're going to make */
   or_options_t const *options = get_options();
 #if defined(HAVE_PWD_H) && defined(HAVE_SYS_UN_H)
@@ -1162,7 +1123,6 @@ connection_listener_new(const struct sockaddr *listensockaddr,
   static int global_next_session_group = SESSION_GROUP_FIRST_AUTO;
   tor_addr_t addr;
 
-  //
   if (get_n_open_sockets() >= options->ConnLimit_-1) {
     warn_too_many_conns();
     return NULL;
@@ -1170,6 +1130,10 @@ connection_listener_new(const struct sockaddr *listensockaddr,
 
   if (listensockaddr->sa_family == AF_INET ||
       listensockaddr->sa_family == AF_INET6) {
+
+	// XXX: mTCP changes: this will probably make everything not work, since
+	// UDP sockets (type SOCK_DGRAM) will not work w/ mTCP
+	// FIXME: this needs to be addressed in tor_open_socket()
     int is_stream = (type != CONN_TYPE_AP_DNS_LISTENER);
     if (is_stream)
       start_reading = 1;
@@ -1179,10 +1143,18 @@ connection_listener_new(const struct sockaddr *listensockaddr,
     log_notice(LD_NET, "Opening %s on %s",
                conn_type_to_string(type), fmt_addrport(&addr, usePort));
 
-    //SOO:
-    s = tor_open_socket_nonblocking(tor_addr_family(&addr),
-      is_stream ? SOCK_STREAM : SOCK_DGRAM,
-      is_stream ? IPPROTO_TCP: IPPROTO_UDP);
+#ifdef USE_MTCP
+	s = tor_open_socket_nonblocking(
+			mtcp_thread_ctx,
+			tor_addr_family(&addr),
+			is_stream ? SOCK_STREAM : SOCK_DGRAM,
+			is_stream ? IPPROTO_TCP: IPPROTO_UDP);
+#else
+	s = tor_open_socket_nonblocking(
+			tor_addr_family(&addr),
+			is_stream ? SOCK_STREAM : SOCK_DGRAM,
+			is_stream ? IPPROTO_TCP: IPPROTO_UDP);
+#endif
     if (!SOCKET_OK(s)) {
       log_warn(LD_NET, "Socket creation failed: %s",
                tor_socket_strerror(tor_socket_errno(-1)));
@@ -1195,6 +1167,9 @@ connection_listener_new(const struct sockaddr *listensockaddr,
                tor_socket_strerror(errno));
     }
 
+    // XXX: mTCP changes: let's not go here if mTCP is being used, as it
+    // does not support other families other than AF_INET
+#ifndef USE_MTCP
 #if defined USE_TRANSPARENT && defined(IP_TRANSPARENT)
     if (options->TransProxyType_parsed == TPT_TPROXY &&
         type == CONN_TYPE_AP_TRANS_LISTENER) {
@@ -1229,10 +1204,45 @@ connection_listener_new(const struct sockaddr *listensockaddr,
         /* Keep going; probably not harmful. */
       }
     }
-#endif
+#endif	// XXX: IPV6_V6ONLY
+#endif	// XXX: mTCP
 
-    if ( mtcp_bind(conn->ctx->mctx, s, listensockaddr,socklen) < 0){
-   // if (mtcp_bind(conn->ctx->mctx, s,listensockaddr,socklen) < 0) {
+#ifdef USE_MTCP
+
+    // XXX: mTCP changes: again, due to limitations of mTCP (i.e. no support
+    // for SOCK_DGRAM type), only go ahead if created socket is of type
+    // SOCK_STREAM
+    if (is_stream) {
+
+		if (mtcp_bind(
+				mtcp_thread_ctx->mctx,
+				s,
+				(struct sockaddr *) &listensockaddr,
+				socklen) < 0) {
+
+//			TRACE_ERROR("Failed to bind to the listening socket!\n");
+//			return -1;
+			const char * helpfulhint = "";
+			int e = tor_socket_errno(s);
+			if (ERRNO_IS_EADDRINUSE(e))
+				helpfulhint = ". Is Tor already running?";
+
+			log_warn(
+					LD_NET,
+					"(tor + mTCP): could not bind to %s:%u: %s%s",
+					address,
+					usePort,
+					tor_socket_strerror(e),
+					helpfulhint);
+
+			goto err;
+		}
+
+    } else {
+
+#endif	// XXX: mTCP
+
+    if (bind(s,listensockaddr,socklen) < 0) {
       const char *helpfulhint = "";
       int e = tor_socket_errno(s);
       if (ERRNO_IS_EADDRINUSE(e))
@@ -1242,12 +1252,37 @@ connection_listener_new(const struct sockaddr *listensockaddr,
       goto err;
     }
 
+#ifdef USE_MTCP
+    }
+#endif	// XXX: mTCP
+
     if (is_stream) {
+
+#ifdef USE_MTCP
+
+	// XXX: mTCP changes: for some reason, mTCP uses a backlog limit of 4096
+    // (while tor normally starts with INT_MAX, goes down to SOMAXCONN)
+	if (mtcp_listen(mtcp_thread_ctx->mctx, s, 4096) < 0) {
+
+		//TRACE_ERROR("mtcp_listen() failed!\n");
+		//return -1;
+		log_warn(
+				LD_NET,
+				"(tor + mTCP): could not listen on %s:%u: %s",
+				address,
+				usePort,
+				tor_socket_strerror(tor_socket_errno(s)));
+
+		goto err;
+	}
+
+#else
       if (tor_listen(s) < 0) {
         log_warn(LD_NET, "Could not listen on %s:%u: %s", address, usePort,
                  tor_socket_strerror(tor_socket_errno(s)));
         goto err;
       }
+#endif
     }
 
     if (usePort != 0) {
@@ -1268,6 +1303,7 @@ connection_listener_new(const struct sockaddr *listensockaddr,
   /*
    * AF_UNIX generic setup stuff
    */
+	// XXX: mTCP changes: let's "not want to care about this right now"...
   } else if (listensockaddr->sa_family == AF_UNIX) {
     /* We want to start reading for both AF_UNIX cases */
     start_reading = 1;
@@ -1298,7 +1334,7 @@ connection_listener_new(const struct sockaddr *listensockaddr,
       goto err;
     }
 
-    if (mtcp_bind(conn->ctx->mctx, s, listensockaddr,
+    if (bind(s, listensockaddr,
              (socklen_t)sizeof(struct sockaddr_un)) == -1) {
       log_warn(LD_NET,"Bind to %s failed: %s.", address,
                tor_socket_strerror(tor_socket_errno(s)));
@@ -1361,6 +1397,9 @@ connection_listener_new(const struct sockaddr *listensockaddr,
   s = TOR_INVALID_SOCKET; /* Prevent double-close */
   conn->address = tor_strdup(address);
   conn->port = gotPort;
+#ifdef USE_MTCP
+  conn->mtcp_thread_ctx = mtcp_thread_ctx;
+#endif
   tor_addr_copy(&conn->addr, &addr);
 
   if (port_cfg->entry_cfg.isolation_flags) {
@@ -1405,13 +1444,20 @@ connection_listener_new(const struct sockaddr *listensockaddr,
 
   return conn;
 
- err:
-  if (SOCKET_OK(s))
-    mtcp_close(conn->ctx->mctx,s);
-  if (conn)
-    connection_free(conn);
+	err:
+	if (SOCKET_OK(s)) {
+// XXX: mTCP changes: closing sockets, the mTCP way
+#ifdef USE_MTCP
+		tor_close_socket(mtcp_thread_ctx, s);
+#else
+		tor_close_socket(s);
+#endif
+	}
 
-  return NULL;
+	if (conn)
+		connection_free(conn);
+
+	return NULL;
 }
 
 /** Do basic sanity checking on a newly received socket. Return 0
@@ -1485,11 +1531,6 @@ check_sockaddr_family_match(sa_family_t got, connection_t *listener)
 static int
 connection_handle_listener_read(connection_t *conn, int new_type)
 {
-
-
-
-  //TODO: SOO:: listener = mtcp_socket(ctx->mctx, AF_INET, SOCK_STREAM, 0);
-	// listenier is a new socket!
   tor_socket_t news; /* the new socket */
   connection_t *newconn;
   /* information about the remote peer when connecting to other routers */
@@ -1502,43 +1543,21 @@ connection_handle_listener_read(connection_t *conn, int new_type)
   tor_assert((size_t)remotelen >= sizeof(struct sockaddr_in));
   memset(&addrbuf, 0, sizeof(addrbuf));
 
-  //TODO: SOOJIN change this to mtcp_setsock_nonblock
-
-  //mctx_t mctx = conn->ctx->mctx;
-  //create a socket
- int listener = mtcp_socket(conn->ctx->mctx, AF_INET, SOCK_STREAM, 0);
-	if (listener < 0) {
-		//TRACE_ERROR("Failed to create listening socket!\n");
-		return -1;
-	}
-
-  news  = mtcp_setsock_nonblock(conn->ctx->mctx, listener);
-
-  // XXX: SOOJIN TOLD DAMIAO TO COMMENT THIS
-//  if (news < 0) {
-//	//TRACE_ERROR("Failed to set socket in nonblocking mode.\n");
-//	return -1;
-//    /* else there was a real error. */
-//    log_warn(LD_NET,"accept() failed: %s. Closing listener.",
-//             tor_socket_strerror(e));
-//    connection_mark_for_close(conn);
-//    return -1;
-//  }
-  //news = tor_accept_socket_nonblocking(conn->s,remote,&remotelen);
-//  if (!SOCKET_OK(news)) { /* accept() error */
-//    int e = tor_socket_errno(conn->s);
-//    if (ERRNO_IS_ACCEPT_EAGAIN(e)) {
-//      return 0; /* he hung up before we could accept(). that's fine. */
-//    } else if (ERRNO_IS_ACCEPT_RESOURCE_LIMIT(e)) {
-//      warn_too_many_conns();
-//      return 0;
-//    }
-//    /* else there was a real error. */
-//    log_warn(LD_NET,"accept() failed: %s. Closing listener.",
-//             tor_socket_strerror(e));
-//    connection_mark_for_close(conn);
-//    return -1;
-//  }
+  news = tor_accept_socket_nonblocking(conn->s,remote,&remotelen);
+  if (!SOCKET_OK(news)) { /* accept() error */
+    int e = tor_socket_errno(conn->s);
+    if (ERRNO_IS_ACCEPT_EAGAIN(e)) {
+      return 0; /* he hung up before we could accept(). that's fine. */
+    } else if (ERRNO_IS_ACCEPT_RESOURCE_LIMIT(e)) {
+      warn_too_many_conns();
+      return 0;
+    }
+    /* else there was a real error. */
+    log_warn(LD_NET,"accept() failed: %s. Closing listener.",
+             tor_socket_strerror(e));
+    connection_mark_for_close(conn);
+    return -1;
+  }
   log_debug(LD_NET,
             "Connection accepted on socket %d (child of fd %d).",
             (int)news,(int)conn->s);
@@ -1552,7 +1571,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
                conn_type_to_string(new_type),
                tor_socket_strerror(errno));
     }
-    mtcp_close(conn->ctx->mctx, news);
+    tor_close_socket(news);
     return 0;
   }
 
@@ -1560,7 +1579,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
     set_constrained_socket_buffers(news, (int)options->ConstrainedSockSize);
 
   if (check_sockaddr_family_match(remote->sa_family, conn) < 0) {
-    mtcp_close(conn->ctx->mctx, news);
+    tor_close_socket(news);
     return 0;
   }
 
@@ -1571,7 +1590,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
     if (check_sockaddr(remote, remotelen, LOG_INFO)<0) {
       log_info(LD_NET,
                "accept() returned a strange address; closing connection.");
-      mtcp_close(conn->ctx->mctx, news);
+      tor_close_socket(news);
       return 0;
     }
 
@@ -1584,7 +1603,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
         log_notice(LD_APP,
                    "Denying socks connection from untrusted address %s.",
                    fmt_and_decorate_addr(&addr));
-        mtcp_close(conn->ctx->mctx, news);
+        tor_close_socket(news);
         return 0;
       }
     }
@@ -1593,7 +1612,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
       if (dir_policy_permits_address(&addr) == 0) {
         log_notice(LD_DIRSERV,"Denying dir connection from address %s.",
                    fmt_and_decorate_addr(&addr));
-        mtcp_close(conn->ctx->mctx, news);
+        tor_close_socket(news);
         return 0;
       }
     }
@@ -1757,11 +1776,11 @@ connection_connect_sockaddr(connection_t *conn,
              tor_socket_strerror(errno));
   }
 
-  if (bindaddr && mtcp_bind(conn->ctx->mctx, s, bindaddr, bindaddr_len) < 0) {
+  if (bindaddr && bind(s, bindaddr, bindaddr_len) < 0) {
     *socket_error = tor_socket_errno(s);
     log_warn(LD_NET,"Error binding network socket: %s",
              tor_socket_strerror(*socket_error));
-    mtcp_close(conn->ctx->mctx,s);
+    tor_close_socket(s);
     return -1;
   }
 
@@ -1769,7 +1788,7 @@ connection_connect_sockaddr(connection_t *conn,
   if (options->ConstrainedSockets)
     set_constrained_socket_buffers(s, (int)options->ConstrainedSockSize);
 
-  if (mtcp_connect(conn->ctx->mctx,s, sa, sa_len) < 0) {
+  if (connect(s, sa, sa_len) < 0) {
     int e = tor_socket_errno(s);
     if (!ERRNO_IS_CONN_EINPROGRESS(e)) {
       /* yuck. kill it. */
@@ -1777,7 +1796,7 @@ connection_connect_sockaddr(connection_t *conn,
       log_info(LD_NET,
                "connect() to socket failed: %s",
                tor_socket_strerror(e));
-      mtcp_close(conn->ctx->mctx,s);
+      tor_close_socket(s);
       return -1;
     } else {
       inprogress = 1;
@@ -2399,11 +2418,20 @@ connection_read_proxy_handshake(connection_t *conn)
  *
  * Return 0 on success, -1 on failure.
  **/
+#ifdef USE_MTCP
+retry_listener_ports(
+						struct thread_context * mtcp_thread_ctx,
+						smartlist_t *old_conns,
+						const smartlist_t *ports,
+						smartlist_t *new_conns,
+						int control_listeners_only)
+#else
 static int
 retry_listener_ports(smartlist_t *old_conns,
                      const smartlist_t *ports,
                      smartlist_t *new_conns,
                      int control_listeners_only)
+#endif
 {
   smartlist_t *launch = smartlist_new();
   int r = 0;
@@ -2488,10 +2516,21 @@ retry_listener_ports(smartlist_t *old_conns,
     }
 
     if (listensockaddr) {
-      conn = connection_listener_new(listensockaddr, listensocklen,
-                                     port->type, address, port);
+
+#ifdef USE_MTCP
+
+        conn = connection_listener_new(
+										mtcp_thread_ctx,
+										listensockaddr, listensocklen,
+										port->type, address, port);
+#else
+        conn = connection_listener_new(listensockaddr, listensocklen,
+                                       port->type, address, port);
+#endif
+
       tor_free(listensockaddr);
       tor_free(address);
+
     } else {
       conn = NULL;
     }
@@ -2519,9 +2558,18 @@ retry_listener_ports(smartlist_t *old_conns,
  * If <b>close_all_noncontrol</b> is true, then we only open control
  * listeners, and we close all other listeners.
  */
+#ifdef USE_MTCP
+
+int retry_all_listeners(
+					struct thread_context * mtcp_thread_ctx,
+					smartlist_t *replaced_conns,
+                    smartlist_t *new_conns, int close_all_noncontrol)
+
+#else
 int
 retry_all_listeners(smartlist_t *replaced_conns,
                     smartlist_t *new_conns, int close_all_noncontrol)
+#endif
 {
   smartlist_t *listeners = smartlist_new();
   const or_options_t *options = get_options();
@@ -2536,11 +2584,30 @@ retry_all_listeners(smartlist_t *replaced_conns,
       smartlist_add(listeners, conn);
   } SMARTLIST_FOREACH_END(conn);
 
-  if (retry_listener_ports(listeners,
-                           get_configured_ports(),
-                           new_conns,
-                           close_all_noncontrol) < 0)
-    retval = -1;
+#ifdef USE_MTCP
+
+	if (retry_listener_ports(
+			mtcp_thread_ctx,
+			listeners,
+			get_configured_ports(),
+			new_conns,
+			close_all_noncontrol) < 0) {
+
+		retval = -1;
+	}
+
+#else
+
+	if (retry_listener_ports(
+			listeners,
+			get_configured_ports(),
+			new_conns,
+			close_all_noncontrol) < 0) {
+
+		retval = -1;
+	}
+
+#endif
 
   /* Any members that were still in 'listeners' don't correspond to
    * any configured port.  Kill 'em. */
@@ -3402,8 +3469,6 @@ connection_handle_read_impl(connection_t *conn)
   tor_assert(!conn->marked_for_close);
 
   before = buf_datalen(conn->inbuf);
-
-  //SOO: change connectin tread to buf
   if (connection_read_to_buf(conn, &max_to_read, &socket_error) < 0) {
     /* There's a read error; kill the connection.*/
     if (conn->type == CONN_TYPE_OR) {
@@ -3584,7 +3649,7 @@ connection_read_to_buf(connection_t *conn, ssize_t *max_to_read,
         result = 0;
         break; /* so we call bucket_decrement below */
       default:
-	break;
+        break;
     }
     pending = tor_tls_get_pending_bytes(or_conn->tls);
     if (pending) {

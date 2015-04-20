@@ -86,6 +86,11 @@
 #include <event2/util.h>
 #endif
 
+#ifdef USE_MTCP
+#include <mtcp_api.h>
+#include <mtcp_epoll.h>
+#endif
+
 #include "crypto.h"
 #include "tortls.h"
 #include "../common/torlog.h"
@@ -1186,6 +1191,21 @@ typedef struct server_port_cfg_t {
 #define CONTROL_CONNECTION_MAGIC 0x8abc765du
 #define LISTENER_CONNECTION_MAGIC 0x1a1ac741u
 
+#ifdef USE_MTCP
+
+// XXX: mTCP changes: not sure about what these are for...
+#define MAX_FLOW_NUM  (10000)
+#define MAX_EVENTS (MAX_FLOW_NUM * 3)
+
+struct thread_context
+{
+	mctx_t mctx;
+	int ep;
+	//struct server_vars *svars;
+};
+
+#endif
+
 /** Description of a connection to another host or process, and associated
  * data.
  *
@@ -1255,8 +1275,20 @@ typedef struct connection_t {
   tor_socket_t s;
   int conn_array_index; /**< Index into the global connection array. */
 
+	// XXX: mTCP changes: if mTCP is used, the 'read' and 'write' events on
+	// connections will have to follow mTCP's mtcp_epoll() interface
+#ifdef USE_MTCP
+
+	struct mtcp_epoll_event * read_event;
+	struct mtcp_epoll_event * write_event;
+
+	struct thread_context * mtcp_thread_ctx;
+
+#else
   struct event *read_event; /**< Libevent event structure. */
   struct event *write_event; /**< Libevent event structure. */
+#endif
+
   buf_t *inbuf; /**< Buffer holding data read over this connection. */
   buf_t *outbuf; /**< Buffer holding data to write over this connection. */
   size_t outbuf_flushlen; /**< How much data should we try to flush from the
@@ -1301,10 +1333,6 @@ typedef struct connection_t {
   /** Bytes written since last call to control_event_conn_bandwidth_used().
    * Only used if we're configured to emit CONN_BW events. */
   uint32_t n_written_conn_bw;
-
-  /* Context info for mTCP */
-  struct thread_context *ctx;
-
 } connection_t;
 
 /** Subtype of connection_t; used for a listener socket. */
@@ -5070,4 +5098,3 @@ typedef struct tor_version_t {
 } tor_version_t;
 
 #endif
-

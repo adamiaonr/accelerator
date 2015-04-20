@@ -102,20 +102,6 @@ static int connection_should_read_from_linked_conn(connection_t *conn);
 // passed all over the place (mostly to connection objects).
 /********** mTCP VARIABLES **********/
 #ifdef USE_MTCP
-#include <mtcp_api.h>
-#include <mtcp_epoll.h>
-
-// xxx: mTCP changes: not sure about what these are for...
-#define MAX_FLOW_NUM  (10000)
-#define MAX_EVENTS (MAX_FLOW_NUM * 3)
-
-struct thread_context
-{
-	mctx_t mctx;
-	int ep;
-	//struct server_vars *svars;
-};
-
 struct thread_context * mtcp_thread_ctx;
 #endif
 
@@ -209,6 +195,7 @@ int quiet_level = 0;
  *
  ****************************************************************************/
 
+// XXX: mTCP changes:
 #if 0 && defined(USE_BUFFEREVENTS)
 static void
 free_old_inbuf(connection_t *conn)
@@ -297,6 +284,7 @@ connection_add_impl(connection_t *conn, int is_connecting)
   conn->conn_array_index = smartlist_len(connection_array);
   smartlist_add(connection_array, conn);
 
+	// XXX: mTCP changes: have no idea if this is important or not...
 #ifdef USE_BUFFEREVENTS
   if (connection_type_uses_bufferevent(conn)) {
     if (SOCKET_OK(conn->s) && !conn->linked) {
@@ -357,11 +345,31 @@ connection_add_impl(connection_t *conn, int is_connecting)
 #endif
 
   if (!HAS_BUFFEREVENT(conn) && (SOCKET_OK(conn->s) || conn->linked)) {
+
+#ifdef USE_MTCP
+
+	// XXX: mTCP changes: if mTCP is used, the 'read' and 'write' events on
+	// connections will have to follow mTCP's mtcp_epoll interface
+	conn->read_event =
+			tor_mtcp_event_new(
+					mtcp_thread_ctx->mctx,
+					mtcp_thread_ctx->ep,
+					MTCP_EPOLLIN,
+					conn->s);
+
+	conn->write_event =
+			tor_mtcp_event_new(
+					mtcp_thread_ctx->mctx,
+					mtcp_thread_ctx->ep,
+					MTCP_EPOLLOUT,
+					conn->s);
+#else
     conn->read_event = tor_event_new(tor_libevent_get_base(),
          conn->s, EV_READ|EV_PERSIST, conn_read_callback, conn);
     conn->write_event = tor_event_new(tor_libevent_get_base(),
          conn->s, EV_WRITE|EV_PERSIST, conn_write_callback, conn);
     /* XXXX CHECK FOR NULL RETURN! */
+#endif
   }
 
   log_debug(LD_NET,"new conn type %s, socket %d, address %s, n_conns %d.",
@@ -375,6 +383,22 @@ connection_add_impl(connection_t *conn, int is_connecting)
 void
 connection_unregister_events(connection_t *conn)
 {
+	// XXX: mTCP changes: will only free the memory allocated to read and
+	// write events in tor_mtcp_event_new(), i.e. no 'mTCP mumbo jumbo'
+	// such as mtcp_epoll_ctl(MTCP_EPOLL_CTL_DEL) and stuff... which may
+	// need to be done in the future
+#ifdef USE_MTCP
+
+	if (conn->read_event) {
+		tor_free(conn->read_event);
+	}
+
+	if (conn->write_event) {
+		tor_free(conn->write_event);
+	}
+
+#else
+
   if (conn->read_event) {
     if (event_del(conn->read_event))
       log_warn(LD_BUG, "Error removing read event for %d", (int)conn->s);
@@ -385,6 +409,9 @@ connection_unregister_events(connection_t *conn)
       log_warn(LD_BUG, "Error removing write event for %d", (int)conn->s);
     tor_free(conn->write_event);
   }
+
+#endif
+
 #ifdef USE_BUFFEREVENTS
   if (conn->bufev) {
     bufferevent_free(conn->bufev);
@@ -2122,9 +2149,9 @@ do_main_loop(void)
 
     /* poll until we have an event, or the second ends, or until we have
      * some active linked connections to trigger events for. */
-    // TODO: maybe change use of libevent to DPDK's own polling mechanism. look
-    // at l2fwd example. we probably need to BYPASS this one too...
-    // http://dpdk.org/doc/guides/sample_app_ug/l2_forward_real_virtual.html
+    // TODO: mTCP changes: this seems to be the place where mtcp_epoll_wait()
+    // should be called. i guess this should happen IN PARALELL with
+    // event_base_loop() and NOT AS A REPLACEMENT.
     loop_result = event_base_loop(tor_libevent_get_base(),
                                   called_loop_once ? EVLOOP_ONCE : 0);
 

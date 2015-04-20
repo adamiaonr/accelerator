@@ -1086,18 +1086,12 @@ tor_close_socket_simple(tor_socket_t s)
   * tor_close_socket to close sockets, and always using close() on
   * files.
   */
-  #if defined(_WIN32)
-    r = closesocket(s);
+#if defined(_WIN32)
 
-    // xxx: mTCP changes: there's also an mTCP way of closing sockets
-    #elif defined(USE_MTCP)
-
-    // fixme: mTCP changes: again, where do we get ctx->mctx from?
-    r = mtcp_close(ctx->mctx, s);
-
-  #else
-    r = close(s);
-  #endif
+	r = closesocket(s);
+#else
+	r = close(s);
+#endif
 
   if (r != 0) {
     int err = tor_socket_errno(-1);
@@ -1107,6 +1101,30 @@ tor_close_socket_simple(tor_socket_t s)
 
   return r;
 }
+
+#ifdef USE_MTCP
+/** tor 'wrapper' for mtcp_close()
+ *
+ */
+int tor_close_socket(mctx_t mtcp_ctx, tor_socket_t s)
+{
+	// XXX: mTCP changes: there's also an mTCP way of closing sockets
+	int r = mtcp_close(mtcp_thread_ctx->mctx, s);
+
+	if (r != 0) {
+
+		int err = tor_socket_errno(-1);
+		log_info(
+				LD_NET,
+				"(tor + mTCP): mtcp_close returned an error: %s",
+				tor_socket_strerror(err));
+
+		return err;
+	}
+
+	return r;
+}
+#endif
 
 /** As tor_close_socket_simple(), but keeps track of the number
  * of open sockets. Returns 0 on success, -1 on failure. */
@@ -1174,6 +1192,146 @@ mark_socket_open(tor_socket_t s)
 #endif
 /** @} */
 
+#ifdef USE_MTCP
+/** As socket(), but counts the number of open sockets. */
+tor_socket_t tor_open_socket(
+		struct thread_context * mtcp_thread_ctx,
+		int domain,
+		int type,
+		int protocol)
+{
+	return tor_open_socket_with_extensions(
+			mtcp_thread_ctx,
+			domain,
+			type,
+			protocol,
+			1, 0);
+}
+
+/** As socket(), but creates a nonblocking socket and
+ * counts the number of open sockets. */
+tor_socket_t tor_open_socket_nonblocking(
+		struct thread_context * mtcp_thread_ctx,
+		int domain,
+		int type,
+		int protocol)
+{
+  return tor_open_socket_with_extensions(
+			mtcp_thread_ctx,
+			domain,
+			type,
+			protocol,
+			1, 1);
+}
+
+/** As socket(), but counts the number of open sockets and handles
+ * socket creation with either of SOCK_CLOEXEC and SOCK_NONBLOCK specified.
+ * <b>cloexec</b> and <b>nonblock</b> should be either 0 or 1 to indicate
+ * if the corresponding extension should be used.*/
+tor_socket_t tor_open_socket_with_extensions(
+		struct thread_context * mtcp_thread_ctx,
+		int domain,
+		int type,
+		int protocol,
+		int cloexec, int nonblock)
+{
+	tor_socket_t s;
+
+#if defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
+	int ext_flags =		(cloexec ? SOCK_CLOEXEC : 0) |
+						(nonblock ? SOCK_NONBLOCK : 0);
+
+	s = socket(domain, type|ext_flags, protocol);
+
+	if (SOCKET_OK(s))
+		goto socket_ok;
+
+	/* If we got an error, see if it is EINVAL. EINVAL might indicate that,
+	* even though we were built on a system with SOCK_CLOEXEC and SOCK_NONBLOCK
+	* support, we are running on one without. */
+	if (errno != EINVAL)
+		return s;
+#endif /* SOCK_CLOEXEC && SOCK_NONBLOCK */
+
+	// XXX: mTCP changes: use mtcp_socket() instead of socket() if mTCP is being
+	// used
+	// FIXME: only do this if socket is of type SOCK_STREAM, as mTCP doesn't
+	// accept sockets of type SOCK_STREAM (UDP) this may actually make
+	// everything not work...
+	if (domain == AF_INET && type == SOCK_STREAM) {
+
+		// TODO: mTCP changes: where do we get the mctx from though?
+
+		// xxx: mTCP changes: we hardcode the args to AF_INET, SOCK_STREAM and
+		// 0 (which corresponds to the system's default for 'protocol', given the
+		// AF_INET + SOCK_STREAM combination)
+		s = mtcp_socket(mtcp_thread_ctx->mctx, AF_INET, SOCK_STREAM, 0);
+
+		if (s < 0) {
+
+			// xxx: mTCP changes: ALWAYS return error codes defined by the
+			// tor source code (and NOT by mTCP's): 'when in rome, do as the
+			// roman's do'...
+			//TRACE_ERROR("Failed to create listening socket!\n");
+			log_err(LD_GENERAL, "(tor + mTCP): failed to create listening socket!\n");
+			//return -1;
+			return s;
+		}
+
+		if (nonblock) {
+
+			int ret = mtcp_setsock_nonblock(mtcp_thread_ctx->mctx, s);
+			if (ret < 0) {
+				//TRACE_ERROR("Failed to set socket in nonblocking mode.\n");
+				log_err(LD_GENERAL, "(tor + mTCP): failed to set socket in nonblocking mode.\n");
+				//return -1;
+				return TOR_INVALID_SOCKET;
+			}
+		}
+
+		// xxx: mTCP changes: go to the end of the method, bypass normal
+		// socket API calls
+		goto socket_ok;
+	}
+
+	s = socket(domain, type, protocol);
+
+	if (!SOCKET_OK(s))
+		return s;
+
+#if defined(FD_CLOEXEC)
+	if (cloexec) {
+		if (fcntl(s, F_SETFD, FD_CLOEXEC) == -1) {
+			log_warn(LD_FS,"Couldn't set FD_CLOEXEC: %s", strerror(errno));
+			tor_close_socket_simple(s);
+			return TOR_INVALID_SOCKET;
+		}
+	}
+#else
+	(void)cloexec;
+#endif
+
+	if (nonblock) {
+
+		if (set_socket_nonblocking(s) == -1) {
+
+			tor_close_socket_simple(s);
+			return TOR_INVALID_SOCKET;
+		}
+	}
+
+	goto socket_ok; /* So that socket_ok will not be unused. */
+
+	socket_ok:
+	socket_accounting_lock();
+	++n_sockets_open;
+	mark_socket_open(s);
+	socket_accounting_unlock();
+
+	return s;
+}
+#else
+
 /** As socket(), but counts the number of open sockets. */
 tor_socket_t
 tor_open_socket(int domain, int type, int protocol)
@@ -1211,32 +1369,6 @@ tor_open_socket_with_extensions(int domain, int type, int protocol,
     return s;
 #endif /* SOCK_CLOEXEC && SOCK_NONBLOCK */
 
-	// XXX: mTCP changes: use mtcp_socket() instead of socket() if mTCP is being
-	// used
-#ifdef USE_MTCP
-
-	struct mtcp_epoll_event mtcp_ev;
-	// TODO: mTCP changes: where do we get the mctx from though?
-	mctx_t mctx = ctx->mctx;
-
-	// xxx: mTCP changes: we hardcode the args to AF_INET, SOCK_STREAM and
-	// 0 (which corresponds to the system's default for 'protocol', given the
-	// AF_INET + SOCK_STREAM combination)
-	s = mtcp_socket(mctx, AF_INET, SOCK_STREAM, 0);
-
-	if (s < 0) {
-
-		// xxx: mTCP changes: ALWAYS return error codes defined by the
-		// tor source code (and NOT by mTCP's): 'when in rome, do as the
-		// roman's do'...
-		//TRACE_ERROR("Failed to create listening socket!\n");
-		log_err(LD_GENERAL, "(tor + mTCP): failed to create listening socket!\n");
-		//return -1;
-		return s;
-	}
-
-#else
-
   s = socket(domain, type, protocol);
   if (! SOCKET_OK(s))
     return s;
@@ -1253,30 +1385,14 @@ tor_open_socket_with_extensions(int domain, int type, int protocol,
   (void)cloexec;
 #endif
 
-#endif	// xxx: mTCP changes: USE_MTCP
-
 	if (nonblock) {
 
-		// xxx: mTCP changes: we delay the setting of s as nonblocking to this
-		// code block, as initially intended in tor's src code. we do this
-		// since tor_open_socket is called in both blocking and non-blocking
-		// mode all over tor's src code...
-#ifdef USE_MTCP
 
-		int ret = mtcp_setsock_nonblock(ctx->mctx, s);
-		if (ret < 0) {
-			//TRACE_ERROR("Failed to set socket in nonblocking mode.\n");
-			log_err(LD_GENERAL, "(tor + mTCP): failed to set socket in nonblocking mode.\n");
-			//return -1;
-			return TOR_INVALID_SOCKET;
-		}
-#else
 		if (set_socket_nonblocking(s) == -1) {
 
 			tor_close_socket_simple(s);
 			return TOR_INVALID_SOCKET;
 		}
-#endif	// xxx: mTCP chnages: USE_MTCP
 	}
 
 	goto socket_ok; /* So that socket_ok will not be unused. */
@@ -1289,6 +1405,176 @@ tor_open_socket_with_extensions(int domain, int type, int protocol,
 
 	return s;
 }
+#endif	// XXX: USE_MTCP
+
+#ifdef USE_MTCP
+
+/** As accept(), but counts the number of open sockets. */
+tor_socket_t tor_accept_socket(
+		struct thread_context * mtcp_thread_ctx,
+		tor_socket_t sockfd,
+		struct sockaddr * addr,
+		socklen_t * len)
+{
+	return tor_accept_socket_with_extensions(
+			mtcp_thread_ctx,
+			sockfd,
+			addr,
+			len,
+			1, 0);
+}
+
+/** As accept(), but returns a nonblocking socket and
+ * counts the number of open sockets. */
+tor_socket_t tor_accept_socket_nonblocking(
+		struct thread_context * mtcp_thread_ctx,
+		tor_socket_t sockfd,
+		struct sockaddr * addr,
+		socklen_t *len)
+{
+	return tor_accept_socket_with_extensions(
+			mtcp_thread_ctx,
+			sockfd,
+			addr,
+			len,
+			1, 1);
+}
+
+/** As accept(), but counts the number of open sockets and handles
+ * socket creation with either of SOCK_CLOEXEC and SOCK_NONBLOCK specified.
+ * <b>cloexec</b> and <b>nonblock</b> should be either 0 or 1 to indicate
+ * if the corresponding extension should be used.*/
+tor_socket_t tor_accept_socket_with_extensions(
+		struct thread_context * mtcp_thread_ctx,
+		tor_socket_t sockfd,
+		struct sockaddr * addr,
+		socklen_t * len,
+		int cloexec,
+		int nonblock)
+{
+	tor_socket_t s;
+
+	// XXX: mTCP changes: let's hope this HAVE_ACCEPT4 thing isn't used
+#if defined(HAVE_ACCEPT4) && defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
+	int ext_flags = (cloexec ? SOCK_CLOEXEC : 0) |
+					(nonblock ? SOCK_NONBLOCK : 0);
+	s = accept4(sockfd, addr, len, ext_flags);
+
+	if (SOCKET_OK(s))
+		goto socket_ok;
+	/* If we got an error, see if it is ENOSYS. ENOSYS indicates that,
+	* even though we were built on a system with accept4 support, we
+	* are running on one without. Also, check for EINVAL, which indicates that
+	* we are missing SOCK_CLOEXEC/SOCK_NONBLOCK support. */
+	if (errno != EINVAL && errno != ENOSYS)
+		return s;
+#endif
+
+	// XXX: mTCP changes: use mtcp_accept() instead of accept() if mTCP is being
+	// used.
+	struct mtcp_epoll_event mtcp_ev;
+	//mctx_t mtcp_ctx = mtcp_thread_ctx->mctx;
+
+	// xxx: mTCP changes: change 'listener' to 'sockfd' (passed as argument of
+	// type tor_socket_t - i.e. an int - to tor_accept*)
+	s = mtcp_accept(mtcp_thread_ctx->mctx, sockfd, NULL, NULL);
+
+	if (s >= 0) {
+
+		if (s >= MAX_FLOW_NUM) {
+
+			// xxx: mTCP changes: ALWAYS return error codes defined by the
+			// tor source code (and NOT by mTCP's): 'when in rome, do as the
+			// roman's do'...
+			//TRACE_ERROR("Invalid socket id %d.\n", c);
+			log_err(LD_GENERAL, "(tor + mTCP): invalid socket id %d.\n", s);
+
+			//return -1;
+			return TOR_INVALID_SOCKET;
+		}
+
+		// XXX: mTCP changes: i don't think we'll need this for tor: this
+		// has been taken from mTCP's apps/example/epserver.c example
+		//sv = &ctx->svars[c];
+		//CleanServerVariable(sv);
+
+		//TRACE_APP("New connection %d accepted.\n", c);
+		log_info(LD_GENERAL, "(tor + mTCP): new connection %d accepted.\n", s);
+
+		mtcp_ev.events = MTCP_EPOLLIN;
+		mtcp_ev.data.sockid = s;
+
+		// FIXME: mTCP changes: in rigor, this should be done below, when
+		// the if (nonblock) { ... } block is called...
+		mtcp_setsock_nonblock(mtcp_thread_ctx->mctx, s);
+
+		// FIXME: mTCP changes: not sure if this 'event' epoll thing needs to
+		// be done here...
+		mtcp_epoll_ctl(
+				mtcp_thread_ctx->mctx,
+				mtcp_thread_ctx->ep,
+				MTCP_EPOLL_CTL_ADD,
+				s,
+				&mtcp_ev);
+
+		//TRACE_APP("Socket %d registered.\n", c);
+		log_info(LD_GENERAL, "(tor + mTCP): socket %d registered.\n", s);
+
+	} else {
+
+		if (errno != EAGAIN) {
+
+			//TRACE_ERROR("mtcp_accept() error %s\n", strerror(errno));
+			log_err(
+					LD_GENERAL,
+					"(tor + mTCP): mtcp_accept() error %s\n",
+					strerror(errno));
+
+			// XXX: mTCP changes: you should return now, as in the normal
+			// tor cases...
+			return s;
+		}
+	}
+
+	// XXX: mTCP changes: don't think SOCK_DGRAM sockets will be handled by
+	// accept() anyway...
+//	s = accept(sockfd, addr, len);
+//
+//	if (!SOCKET_OK(s))
+//		return s;
+//
+//#if defined(FD_CLOEXEC)
+//	if (cloexec) {
+//		if (fcntl(s, F_SETFD, FD_CLOEXEC) == -1) {
+//			log_warn(LD_NET, "Couldn't set FD_CLOEXEC: %s", strerror(errno));
+//			tor_close_socket_simple(s);
+//			return TOR_INVALID_SOCKET;
+//		}
+//	}
+//#else
+//	(void)cloexec;
+//#endif
+//
+//	if (nonblock) {
+//		if (set_socket_nonblocking(s) == -1) {
+//			tor_close_socket_simple(s);
+//			return TOR_INVALID_SOCKET;
+//		}
+//	}
+
+	goto socket_ok; /* So that socket_ok will not be unused. */
+
+	socket_ok:
+	socket_accounting_lock();
+	++n_sockets_open;
+	// TODO: mTCP changes: not sure if this will cause problems in the future
+	mark_socket_open(s);
+	socket_accounting_unlock();
+
+	return s;
+}
+
+#else
 
 /** As accept(), but counts the number of open sockets. */
 tor_socket_t
@@ -1330,68 +1616,6 @@ tor_accept_socket_with_extensions(tor_socket_t sockfd, struct sockaddr *addr,
     return s;
 #endif
 
-	// XXX: mTCP changes: use mtcp_accept() instead of accept() if mTCP is being
-	// used.
-#ifdef USE_MTCP
-
-	struct mtcp_epoll_event mtcp_ev;
-	// TODO: mTCP changes: where do we get the mctx from though?
-	mctx_t mctx = ctx->mctx;
-
-	// xxx: mTCP changes: change 'listener' to 'sockfd' (passed as argument of
-	// type tor_socket_t - i.e. an int - to tor_accept*)
-	s = mtcp_accept(mctx, sockfd, NULL, NULL);
-
-	if (s >= 0) {
-
-		if (s >= MAX_FLOW_NUM) {
-
-			// xxx: mTCP changes: ALWAYS return error codes defined by the
-			// tor source code (and NOT by mTCP's): 'when in rome, do as the
-			// roman's do'...
-			//TRACE_ERROR("Invalid socket id %d.\n", c);
-			log_err(LD_GENERAL, "(tor + mTCP): invalid socket id %d.\n", s);
-
-			//return -1;
-			return TOR_INVALID_SOCKET;
-		}
-
-		// xxx: mTCP changes: i don't think we'll need this for tor: this
-		// has been taken from mTCP's apps/example/epserver.c example
-		//sv = &ctx->svars[c];
-		//CleanServerVariable(sv);
-
-		//TRACE_APP("New connection %d accepted.\n", c);
-		log_info(LD_GENERAL, "(tor + mTCP): new connection %d accepted.\n", s);
-
-		mtcp_ev.events = MTCP_EPOLLIN;
-		mtcp_ev.data.sockid = s;
-
-		// fixme: mTCP changes: in rigor, this should be done below, when
-		// the if (nonblock) { ... } block is called...
-		mtcp_setsock_nonblock(ctx->mctx, s);
-		mtcp_epoll_ctl(mctx, ctx->ep, MTCP_EPOLL_CTL_ADD, s, &mtcp_ev);
-
-		//TRACE_APP("Socket %d registered.\n", c);
-		log_info(LD_GENERAL, "(tor + mTCP): socket %d registered.\n", s);
-
-	} else {
-
-		if (errno != EAGAIN) {
-
-			//TRACE_ERROR("mtcp_accept() error %s\n", strerror(errno));
-			log_err(
-					LD_GENERAL,
-					"(tor + mTCP): mtcp_accept() error %s\n",
-					strerror(errno));
-
-			// xxx: mTCP changes: you should return now, as in the normal
-			// tor cases...
-			return s;
-		}
-	}
-
-#else
   s = accept(sockfd, addr, len);
   if (!SOCKET_OK(s))
     return s;
@@ -1414,19 +1638,18 @@ tor_accept_socket_with_extensions(tor_socket_t sockfd, struct sockaddr *addr,
       return TOR_INVALID_SOCKET;
     }
   }
-#endif	// xxx: mTCP changes: we end USE_MTCP here for tor's socket accounting
 
 	goto socket_ok; /* So that socket_ok will not be unused. */
 
 	socket_ok:
 	socket_accounting_lock();
 	++n_sockets_open;
-	// todo: mTCP changes: not sure if this will cause problems in the future
 	mark_socket_open(s);
 	socket_accounting_unlock();
 
 	return s;
 }
+#endif	// XXX: USE_MTCP
 
 /** Return the number of sockets we currently have opened. */
 int

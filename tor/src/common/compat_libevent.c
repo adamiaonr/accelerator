@@ -119,6 +119,36 @@ suppress_libevent_log_msg(const char *msg)
 }
 #endif
 
+#ifdef USE_MTCP
+
+struct mtcp_epoll_event * tor_mtcp_event_new(
+		mctx_t mctx,
+		int mtcp_event_pool_id,
+		int options,
+		int listen_sock_fd) {
+
+	// FIXME: mTCP changes: wouldn't a calloc() here make more sense? not sure
+	// about how mtcp_epoll_ctl() works under the hood, so will trust on it
+	// for now...
+	// ... NOT!
+	struct mtcp_epoll_event * mtcp_ev =
+			(struct mtcp_epoll_event *) calloc(1, sizeof(struct mtcp_epoll_event));
+
+	mtcp_ev->events = options;
+	mtcp_ev->data.sockid = listen_sock_fd;
+
+	mtcp_epoll_ctl(
+			mctx,
+			mtcp_event_pool_id,
+			MTCP_EPOLL_CTL_ADD,
+			listen_sock_fd,
+			mtcp_ev);
+
+	return mtcp_env;
+}
+
+#endif
+
 #ifndef HAVE_EVENT2_EVENT_H
 /** Work-alike replacement for event_new() on pre-Libevent-2.0 systems. */
 struct event *
