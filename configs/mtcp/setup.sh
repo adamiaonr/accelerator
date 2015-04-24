@@ -39,9 +39,11 @@ while [ "$1" != "" ]; do
                                 ;;
         -m | --build_mtcp )     BUILD_MTCP=1
                                 ;;
-        -h | --help	)			usage
-        						exit
-        						;;
+        -t | --build_tor )	BUILD_TOR=1
+				;;
+	-h | --help	)	usage
+        			exit
+        			;;
         * )                     usage
                                 exit 1
     esac
@@ -55,7 +57,7 @@ done
 
 # 1.2) install necessary libs
 sudo apt-get update
-sudo apt-get install libnuma-dev build-essential linux-headers-3.13.0-49-generic linux-image-3.13.0-46-lowlatency linux-headers-3.13.0-46-lowlatency libevent-dev 
+sudo apt-get install libnuma-dev build-essential linux-image-3.13.0-46-lowlatency linux-headers-3.13.0-46-lowlatency libevent-dev libssl-dev autoconf 
 
 # 1.3) check that the accelerator directories exist
 
@@ -112,7 +114,7 @@ sudo mount -t hugetlbfs hugetlbfs $HUGETLBFS_DIR
 $MTCP_DPDK_NIC_BIND_TOOL --status
 
 # 2.5.2) --force the --bind of eth0 and eth1 ifaces to dpdk's igb_uio driver
-sudo $MTCP_DPDK_NIC_BIND_TOOL --force --bind=igb_uio eth0
+#sudo $MTCP_DPDK_NIC_BIND_TOOL --force --bind=igb_uio eth0
 sudo $MTCP_DPDK_NIC_BIND_TOOL --force --bind=igb_uio eth1
 
 # 2.5.3) show new status of iface bindings

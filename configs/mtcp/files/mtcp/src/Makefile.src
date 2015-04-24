@@ -14,7 +14,7 @@ MTCP_HDR = mtcp_api.h mtcp_epoll.h
 GCC = gcc
 
 ### FLAGS ###
-GCC_OPT = -m32 -Wall -fPIC -msse -msse2 -msse3
+GCC_OPT = -m64 -Wall -fPIC -msse -msse2 -msse3
 #DBG_OPT = -DDBGMSG -DDBGFUNC -DSTREAM -DSTATE -DTSTAT -DAPP -DEPOLL
 #DBG_OPT = -DDBGMSG -DDBGFUNC -DSTREAM -DSTATE
 #DBG_OPT += -DPKTDUMP
@@ -40,8 +40,8 @@ PS_DIR=../../io_engine
 INC += -I$(PS_DIR)/include
 
 # DPDK LIBRARY and HEADER
-DPDK_INC=/home/clockwatcher/workbench/accelerator/lib/mtcp/dpdk/include
-DPDK_LIB=/home/clockwatcher/workbench/accelerator/lib/mtcp/dpdk/lib/
+DPDK_INC=/home/${USER}/workbench/accelerator/lib/mtcp/dpdk/include
+DPDK_LIB=/home/${USER}/workbench/accelerator/lib/mtcp/dpdk/lib/
 # CFLAGS for DPDK-related compilation
 ifeq ($(DPDK), 1)
 INC += -DRTE_MACHINE_CPUFLAG_SSE -DRTE_MACHINE_CPUFLAG_SSE2 -DRTE_MACHINE_CPUFLAG_SSE3 \

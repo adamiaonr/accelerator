@@ -1,6 +1,6 @@
 ### GCC ###
 GCC = gcc
-GCC_OPT = -m32 -Wall -fPIC -c
+GCC_OPT = -m64 -Wall -fPIC -c
 GCC_OPT += -DNDEBUG -O3 -DNETSTAT -DINFO -DDBGERR -DDBGCERR
 
 
