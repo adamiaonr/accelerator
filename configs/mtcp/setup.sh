@@ -10,10 +10,11 @@
 # created by: antonior@andrew.cmu.edu
 
 #!/bin/bash
-MTCP_CONFIGS=/home/clockwatcher/workbench/accelerator/configs/mtcp
-MTCP_HOME=/home/clockwatcher/workbench/accelerator/lib/mtcp
+MTCP_CONFIGS=/home/$USER/workbench/accelerator/configs/mtcp
+MTCP_HOME=/home/$USER/workbench/accelerator/lib/mtcp
 MTCP_DPDK=$MTCP_HOME/dpdk-1.8.0
-MTCP_DPDK_RTE_TARGET=$MTCP_DPDK/i686-native-linuxapp-gcc
+MTCP_DPDK_RTE_TARGET_VERSION=x86_64-native-linuxapp-gcc
+MTCP_DPDK_RTE_TARGET=$MTCP_DPDK/$MTCP_DPDK_RTE_TARGET_VERSION
 MTCP_DPDK_NIC_BIND_TOOL=$MTCP_DPDK/tools/dpdk_nic_bind.py
 MTCP_DPDK_BUILD_CONFIG=config
 
@@ -54,11 +55,18 @@ done
 
 # 1.2) install necessary libs
 sudo apt-get update
-sudo apt-get install libnuma-dev build-essential linux-image-3.13.0-46-lowlatency linux-headers-3.13.0-46-lowlatency libevent-dev 
+sudo apt-get install libnuma-dev build-essential linux-headers-3.13.0-49-generic linux-image-3.13.0-46-lowlatency linux-headers-3.13.0-46-lowlatency libevent-dev 
 
 # 1.3) check that the accelerator directories exist
 
 # 1.3.1) if the mTCP submodules aren't initialized, do it now
+if [ ! -d $MTCP_DPDK ]; then
+    
+    cd $MTCP_HOME
+    
+    git submodule init
+    git submodule update
+fi
 
 # 2) setup DPDK for i686 target (32 bit), w/ debugging activated
 cd $MTCP_DPDK
@@ -70,10 +78,10 @@ if [ $BUILD_DPDK -eq 1 ]; then
 
     # 2.2) configure the DPDK build for the target i686 arch + activate debugging
     cp -r $MTCP_CONFIGS/files/dpdk-1.8.0/$MTCP_DPDK_BUILD_CONFIG/* $MTCP_DPDK/$MTCP_DPDK_BUILD_CONFIG/
-    make config T=i686-native-linuxapp-gcc
+    make config T=$MTCP_DPDK_RTE_TARGET_VERSION
 
     make
-    sudo make install T=i686-native-linuxapp-gcc
+    sudo make install T=$MTCP_DPDK_RTE_TARGET_VERSION
 fi
 
 # 2.3) load dpdk's specialized kernel module to allow userspace apps to control 
