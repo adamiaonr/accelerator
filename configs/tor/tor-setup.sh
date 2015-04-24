@@ -17,7 +17,7 @@ NODE_IPS=("172.31.100.10" "172.31.100.20" "172.31.100.30" "172.31.100.40")
 NODE_NAMES=("node1" "node2" "node3" "node4")
 
 usage () {
-    echo "usage: ./run-tor.sh [-p <.pem file> || -f <torrc file> || --with-tcp-dump || --with-inet-connection]"
+    echo "usage: ./tor-setup.sh [-p <.pem file> || -f <torrc file> || --with-tcp-dump || --with-inet-connection]"
 }
 
 W_TCP_DUMP=0
