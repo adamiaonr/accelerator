@@ -1,0 +1,24 @@
+TestingTorNetwork 1
+DataDirectory /home/ubuntu/workbench/accelerator-misc
+RunAsDaemon 1
+ConnLimit 60
+Nickname RS2
+ShutdownWaitLength 0
+PidFile /home/ubuntu/workbench/accelerator-misc/pid
+Log notice file /home/ubuntu/workbench/accelerator-misc/notice.log
+Log info file /home/ubuntu/workbench/accelerator-misc/info.log
+ProtocolWarnings 1
+SafeLogging 0
+DisableDebuggerAttachment 0
+DirAuthority RS4 orport=5000 no-v2 hs v3ident=D3475E0C43BD4DF0EF4603E47A460A158F881A9A 172.31.100.40:7000 E58291DA076ADA4FB6841632BE81A2DE2904474D
+
+SocksPort 0
+OrPort 5000
+Address 172.31.100.20
+
+# An exit policy that allows exiting to IPv4 LAN
+ExitPolicy accept 172.31.100.0/24:*
+
+# An exit policy that allows exiting to IPv6 localhost
+ExitPolicy accept [::1]:*
+IPv6Exit 1
