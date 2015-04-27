@@ -1106,7 +1106,7 @@ tor_close_socket_simple(tor_socket_t s)
 /** tor 'wrapper' for mtcp_close()
  *
  */
-int tor_close_socket(mctx_t mtcp_ctx, tor_socket_t s)
+int tor_close_socket(struct thread_context * mtcp_thread_ctx, tor_socket_t s)
 {
 	// XXX: mTCP changes: there's also an mTCP way of closing sockets
 	int r = mtcp_close(mtcp_thread_ctx->mctx, s);
@@ -1812,6 +1812,8 @@ tor_ersatz_socketpair(int family, int type, int protocol, tor_socket_t fd[2])
     listen_addr.sin_family = AF_INET;
     listen_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     listen_addr.sin_port = 0;   /* kernel chooses port.  */
+    // TODO: mTCP changes: let's also 'trust' that compilation will never get
+    // here (both bind(), listen() and connect())
     if (bind(listener, (struct sockaddr *) &listen_addr, sizeof (listen_addr))
         == -1)
       goto tidy_up_and_fail;

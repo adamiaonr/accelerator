@@ -9,6 +9,7 @@
 #include "orconfig.h"
 #include "torint.h"
 #include "testsupport.h"
+#include "tor_mtcp.h"
 
 #if defined(HAVE_PTHREAD_H) && !defined(_WIN32)
 #include <pthread.h>
@@ -108,8 +109,18 @@ typedef struct alert_sockets_s {
 #define ASOCKS_NOPIPE       (1u<<3)
 #define ASOCKS_NOSOCKETPAIR (1u<<4)
 
-int alert_sockets_create(alert_sockets_t *socks_out, uint32_t flags);
-void alert_sockets_close(alert_sockets_t *socks);
+#ifdef USE_MTCP
+	int alert_sockets_create(
+			struct thread_context * mtcp_thread_ctx,
+			alert_sockets_t * socks_out,
+			uint32_t flags);
+	void alert_sockets_close(
+			struct thread_context * mtcp_thread_ctx,
+			alert_sockets_t * socks);
+#else
+	int alert_sockets_create(alert_sockets_t *socks_out, uint32_t flags);
+	void alert_sockets_close(alert_sockets_t *socks);
+#endif
 
 #endif
 

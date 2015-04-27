@@ -4,3 +4,6 @@
 [submodule "lib/mtcp"]
 	path = lib/mtcp
 	url = https://github.com/eunyoung14/mtcp.git
+[submodule "lib/openssl"]
+	path = lib/openssl
+	url = https://github.com/openssl/openssl.git

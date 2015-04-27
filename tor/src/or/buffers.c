@@ -466,20 +466,42 @@ buf_get_total_allocation(void)
   return total_bytes_allocated_in_chunks;
 }
 
+// FIXME: mTCP changes: changed read_to_chunk signature to include
+// mTCP's thread context
 /** Read up to <b>at_most</b> bytes from the socket <b>fd</b> into
  * <b>chunk</b> (which must be on <b>buf</b>). If we get an EOF, set
  * *<b>reached_eof</b> to 1.  Return -1 on error, 0 on eof or blocking,
  * and the number of bytes read otherwise. */
+#ifdef USE_MTCP
+static INLINE int
+read_to_chunk(
+				struct thread_context * mtcp_thread_ctx,
+				buf_t * buf,
+				chunk_t * chunk,
+				tor_socket_t fd,
+				size_t at_most,
+				int * reached_eof,
+				int * socket_error)
+#else
 static INLINE int
 read_to_chunk(buf_t *buf, chunk_t *chunk, tor_socket_t fd, size_t at_most,
               int *reached_eof, int *socket_error)
+#endif
 {
   ssize_t read_result;
   if (at_most > CHUNK_REMAINING_CAPACITY(chunk))
     at_most = CHUNK_REMAINING_CAPACITY(chunk);
 
-  //TODO: this is there csocket receives data
+// FIXME: mTCP changes: using mtcp_read() instead
+#ifdef USER_MTCP
+  read_result = mtcp_read(
+		  	  	  	  	  mtcp_thread_ctx->mctx,
+						  fd,
+						  CHUNK_WRITE_PTR(chunk),
+						  at_most);
+#else
   read_result = tor_socket_recv(fd, CHUNK_WRITE_PTR(chunk), at_most, 0);
+#endif
 
   if (read_result < 0) {
     int e = tor_socket_errno(fd);
@@ -631,17 +653,36 @@ read_to_buf_tls(tor_tls_t *tls, size_t at_most, buf_t *buf)
  * the bytes written from *<b>buf_flushlen</b>.  Return the number of bytes
  * written on success, 0 on blocking, -1 on failure.
  */
+#ifdef USE_MTCP
 static INLINE int
-flush_chunk(tor_socket_t s, buf_t *buf, chunk_t *chunk, size_t sz,
-            size_t *buf_flushlen)
+flush_chunk(
+			struct thread_context * mtcp_thread_ctx,
+			tor_socket_t s,
+			buf_t * buf,
+			chunk_t * chunk,
+			size_t sz,
+            size_t * buf_flushlen)
+#else
+static INLINE int
+flush_chunk(
+			tor_socket_t s,
+			buf_t * buf,
+			chunk_t * chunk,
+			size_t sz,
+            size_t * buf_flushlen)
+#endif
 {
   ssize_t write_result;
 
   if (sz > chunk->datalen)
     sz = chunk->datalen;
 
-  //TODO:
-  write_result = tor_socket_send(s, chunk->data, sz, 0);
+// XXX: mTCP changes: using mtcp_write() instead
+#ifdef USE_MTCP
+	write_result = mtcp_write(mtcp_thread_ctx->mctx, s, chunk->data, sz);
+#else
+	write_result = tor_socket_send(s, chunk->data, sz, 0);
+#endif
 
   if (write_result < 0) {
     int e = tor_socket_errno(s);

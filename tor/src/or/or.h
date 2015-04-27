@@ -87,8 +87,13 @@
 #endif
 
 #ifdef USE_MTCP
-#include <mtcp_api.h>
-#include <mtcp_epoll.h>
+//#include <mtcp_api.h>
+//#include <mtcp_epoll.h>
+
+// XXX: mTCP changes: replaced all those fine-grained mTCP additions with
+// a tor_mtcp.h file.
+#include "tor_mtcp.h"
+
 #endif
 
 #include "crypto.h"
@@ -1191,20 +1196,21 @@ typedef struct server_port_cfg_t {
 #define CONTROL_CONNECTION_MAGIC 0x8abc765du
 #define LISTENER_CONNECTION_MAGIC 0x1a1ac741u
 
-#ifdef USE_MTCP
-
-// XXX: mTCP changes: not sure about what these are for...
-#define MAX_FLOW_NUM  (10000)
-#define MAX_EVENTS (MAX_FLOW_NUM * 3)
-
-struct thread_context
-{
-	mctx_t mctx;
-	int ep;
-	//struct server_vars *svars;
-};
-
-#endif
+//#ifdef USE_MTCP
+//
+//// XXX: mTCP changes: not sure about what these are for...
+//#define MAX_FLOW_NUM  (10000)
+//#define MAX_EVENTS (MAX_FLOW_NUM * 3)
+//
+//// FIXME: mTCP changes: this should be defined in some tor_mtcp.h file
+//struct thread_context
+//{
+//	mctx_t mctx;
+//	int ep;
+//	//struct server_vars *svars;
+//};
+//
+//#endif
 
 /** Description of a connection to another host or process, and associated
  * data.

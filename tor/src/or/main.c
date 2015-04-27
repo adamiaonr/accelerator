@@ -222,6 +222,8 @@ free_old_inbuf(connection_t *conn)
 }
 #endif
 
+// TODO: mTCP changes: will leave this behind for now, as i'm not sure that
+// USE_BUFFEREVENTS will be used by us...
 #if defined(_WIN32) && defined(USE_BUFFEREVENTS)
 /** Remove the kernel-space send and receive buffers for <b>s</b>. For use
  * with IOCP only. */
@@ -2851,6 +2853,14 @@ tor_cleanup(void)
 #ifdef USE_DMALLOC
   dmalloc_log_unfreed();
   dmalloc_shutdown();
+#endif
+
+// XXX: mTCP changes: initialize mTCP here
+#ifdef USE_MTCP
+
+	mtcp_destroy_context(mtcp_thread_ctx->mctx);
+	mtcp_destroy();
+
 #endif
 }
 

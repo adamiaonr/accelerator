@@ -1514,6 +1514,13 @@ get_interface_address6,(int severity, sa_family_t family, tor_addr_t *addr))
   /* XXX really, this function should yield a smartlist of addresses. */
   smartlist_t *addrs;
   int sock=-1, r=-1;
+
+// XXX: mTCP changes: if mTCP is used, return an error immediately (we won't
+// be connecting to the Internet)
+#ifdef USE_MTCP
+  goto err;
+#endif
+
   struct sockaddr_storage my_addr, target_addr;
   socklen_t addr_len;
   tor_assert(addr);

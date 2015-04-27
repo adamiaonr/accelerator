@@ -645,7 +645,12 @@ connection_free_(connection_t *conn)
 
   if (SOCKET_OK(conn->s)) {
     log_debug(LD_NET,"closing fd %d.",(int)conn->s);
+
+#ifdef USE_MTCP
+    tor_close_socket(mtcp_thread_ctx, conn->s);
+#else
     tor_close_socket(conn->s);
+#endif
     conn->s = TOR_INVALID_SOCKET;
   }
 
@@ -764,7 +769,11 @@ connection_close_immediate(connection_t *conn)
   connection_unregister_events(conn);
 
   if (SOCKET_OK(conn->s))
+#ifdef USE_MTCP
+    tor_close_socket(mtcp_thread_ctx, conn->s);
+#else
     tor_close_socket(conn->s);
+#endif
   conn->s = TOR_INVALID_SOCKET;
   if (conn->linked)
     conn->linked_conn_is_closed = 1;
@@ -1056,6 +1065,8 @@ make_socket_reuseable(tor_socket_t sock)
 #else
   int one=1;
 
+  // XXX: mTCP changes: for WIN32, we'll use _W32 systems (Linux), won't
+  // touch this for now...
   /* REUSEADDR on normal places means you can rebind to the port
    * right after somebody else has let it go. But REUSEADDR on win32
    * means you can bind to the port _even when somebody else
@@ -1103,13 +1114,13 @@ connection_listener_new(
                         socklen_t socklen,
                         int type, const char *address,
                         const port_cfg_t *port_cfg)
-#else
+#else	// XXX: USE_MTCP
 static connection_t *
 connection_listener_new(const struct sockaddr *listensockaddr,
                         socklen_t socklen,
                         int type, const char *address,
                         const port_cfg_t *port_cfg)
-#endif
+#endif	// XXX: USE_MTCP
 {
   listener_connection_t * lis_conn;
   connection_t * conn = NULL;
@@ -1303,7 +1314,9 @@ connection_listener_new(const struct sockaddr *listensockaddr,
   /*
    * AF_UNIX generic setup stuff
    */
-	// XXX: mTCP changes: let's "not want to care about this right now"...
+	// XXX: mTCP changes: let's "not want to care about this right now" as
+    // we're sure the socket family will end up being 'AF_INET' for our
+    // test cases...
   } else if (listensockaddr->sa_family == AF_UNIX) {
     /* We want to start reading for both AF_UNIX cases */
     start_reading = 1;
@@ -1571,7 +1584,11 @@ connection_handle_listener_read(connection_t *conn, int new_type)
                conn_type_to_string(new_type),
                tor_socket_strerror(errno));
     }
+#ifdef USE_MTCP
+    tor_close_socket(mtcp_thread_ctx, news);
+#else
     tor_close_socket(news);
+#endif
     return 0;
   }
 
@@ -1579,7 +1596,11 @@ connection_handle_listener_read(connection_t *conn, int new_type)
     set_constrained_socket_buffers(news, (int)options->ConstrainedSockSize);
 
   if (check_sockaddr_family_match(remote->sa_family, conn) < 0) {
+#ifdef USE_MTCP
+    tor_close_socket(mtcp_thread_ctx, news);
+#else
     tor_close_socket(news);
+#endif
     return 0;
   }
 
@@ -1590,7 +1611,11 @@ connection_handle_listener_read(connection_t *conn, int new_type)
     if (check_sockaddr(remote, remotelen, LOG_INFO)<0) {
       log_info(LD_NET,
                "accept() returned a strange address; closing connection.");
-      tor_close_socket(news);
+#ifdef USE_MTCP
+    tor_close_socket(mtcp_thread_ctx, news);
+#else
+    tor_close_socket(news);
+#endif
       return 0;
     }
 
@@ -1603,7 +1628,11 @@ connection_handle_listener_read(connection_t *conn, int new_type)
         log_notice(LD_APP,
                    "Denying socks connection from untrusted address %s.",
                    fmt_and_decorate_addr(&addr));
+#ifdef USE_MTCP
+        tor_close_socket(mtcp_thread_ctx, news);
+#else
         tor_close_socket(news);
+#endif
         return 0;
       }
     }
@@ -1612,7 +1641,11 @@ connection_handle_listener_read(connection_t *conn, int new_type)
       if (dir_policy_permits_address(&addr) == 0) {
         log_notice(LD_DIRSERV,"Denying dir connection from address %s.",
                    fmt_and_decorate_addr(&addr));
+#ifdef USE_MTCP
+        tor_close_socket(mtcp_thread_ctx, news);
+#else
         tor_close_socket(news);
+#endif
         return 0;
       }
     }
@@ -1776,32 +1809,100 @@ connection_connect_sockaddr(connection_t *conn,
              tor_socket_strerror(errno));
   }
 
+#ifdef USE_MTCP
+
+	if (bindaddr &&
+			(mtcp_bind(
+					mtcp_thread_ctx->mctx,
+					s,
+					(struct sockaddr *) &bindaddr,
+					bindaddr_len) < 0)) {
+
+		*socket_error = tor_socket_errno(s);
+
+		log_warn(
+				LD_NET, "(tor + mTCP): error binding network socket: %s",
+				tor_socket_strerror(*socket_error));
+
+#ifdef USE_MTCP
+		tor_close_socket(mtcp_thread_ctx, s);
+#else
+		tor_close_socket(s);
+#endif
+
+		return -1;
+	}
+
+#else
   if (bindaddr && bind(s, bindaddr, bindaddr_len) < 0) {
     *socket_error = tor_socket_errno(s);
     log_warn(LD_NET,"Error binding network socket: %s",
              tor_socket_strerror(*socket_error));
-    tor_close_socket(s);
+#ifdef USE_MTCP
+		tor_close_socket(mtcp_thread_ctx, s);
+#else
+		tor_close_socket(s);
+#endif
     return -1;
   }
+#endif
 
   tor_assert(options);
   if (options->ConstrainedSockets)
     set_constrained_socket_buffers(s, (int)options->ConstrainedSockSize);
 
-  if (connect(s, sa, sa_len) < 0) {
-    int e = tor_socket_errno(s);
-    if (!ERRNO_IS_CONN_EINPROGRESS(e)) {
-      /* yuck. kill it. */
-      *socket_error = e;
-      log_info(LD_NET,
-               "connect() to socket failed: %s",
-               tor_socket_strerror(e));
-      tor_close_socket(s);
-      return -1;
-    } else {
-      inprogress = 1;
-    }
-  }
+#ifdef USE_MTCP
+
+	// XXX: mTCP changes: we're finally using mtcp_connect() for
+	// something... and this also seems to be the only place in the
+	// code where connect() is called (even for TLS connections seem
+	// to end up here...).
+	if (mtcp_connect(
+			mtcp_thread_ctx->mctx,
+			s,
+			sa,
+			sa_len) < 0) {
+
+		int e = tor_socket_errno(s);
+
+		if (!ERRNO_IS_CONN_EINPROGRESS(e)) {
+			/* yuck. kill it. */
+			*socket_error = e;
+			log_info(
+					LD_NET,
+					"(tor + mTCP): connect() to socket failed: %s",
+					tor_socket_strerror(e));
+
+			tor_close_socket(mtcp_thread_ctx, s);
+
+			return -1;
+
+		} else {
+
+			inprogress = 1;
+		}
+	}
+
+#else
+
+	if (connect(s, sa, sa_len) < 0) {
+
+		int e = tor_socket_errno(s);
+		if (!ERRNO_IS_CONN_EINPROGRESS(e)) {
+			/* yuck. kill it. */
+			*socket_error = e;
+			log_info(
+					LD_NET,
+					"connect() to socket failed: %s",
+					tor_socket_strerror(e));
+			tor_close_socket(s);
+			return -1;
+		} else {
+			inprogress = 1;
+		}
+	}
+
+#endif
 
   /* it succeeded. we're connected. */
   log_fn(inprogress ? LOG_DEBUG : LOG_INFO, LD_NET,
@@ -4707,6 +4808,7 @@ client_check_address_changed(tor_socket_t sock)
   }
 }
 
+// TODO: mTCP changes: let's hope this won't be used by _W32 systems
 /** Some systems have limited system buffers for recv and xmit on
  * sockets allocated in a virtual server or similar environment. For a Tor
  * server this can produce the "Error creating network socket: No buffer

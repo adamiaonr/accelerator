@@ -12,9 +12,6 @@
 #ifndef TOR_CONNECTION_H
 #define TOR_CONNECTION_H
 
-#include "../../../lib/mtcp/mtcp/include/mtcp_api.h"
-#include "../../../lib/mtcp/mtcp/include/mtcp_epoll.h"
-
 #define MAX_FLOW_NUM  (10000)
 
 #define RCVBUF_SIZE (2*1024)
@@ -45,12 +42,8 @@
 /* XXXX For buf_datalen in inline function */
 #include "buffers.h"
 
-struct thread_context
-{
-        mctx_t mctx;
-        int ep;
-        struct server_vars *svars;
-};
+// XXX: mTCP changes: mTCP includes
+#include "tor_mtcp.h"
 
 const char *conn_type_to_string(int type);
 const char *conn_state_to_string(int type, int state);
