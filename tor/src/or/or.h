@@ -87,11 +87,11 @@
 #endif
 
 #ifdef USE_MTCP
-//#include <mtcp_api.h>
-//#include <mtcp_epoll.h>
 
 // XXX: mTCP changes: replaced all those fine-grained mTCP additions with
 // a tor_mtcp.h file.
+//#include <mtcp_api.h>
+//#include <mtcp_epoll.h>
 #include "tor_mtcp.h"
 
 #endif

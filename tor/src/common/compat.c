@@ -135,11 +135,10 @@
 // the need to do it all over the code. e.g. change 'tor_accept_*' to include
 // mtcp_accept() and not accept().
 #ifdef USE_MTCP
-#include <mtcp_api.h>
-#include <mtcp_epoll.h>
 
-// xxx: mTCP changes: not sure about what this is for...
-#define MAX_FLOW_NUM  (10000)
+//#include <mtcp_api.h>
+//#include <mtcp_epoll.h>
+#include "tor_mtcp.h"
 
 #endif
 

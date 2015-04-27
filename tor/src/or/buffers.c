@@ -22,7 +22,6 @@
 #include "ext_orport.h"
 #include "../common/util.h"
 #include "../common/torlog.h"
-//#include "../../../lib/mtcp/mtcp/src/include/mtcp_api.h"
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>

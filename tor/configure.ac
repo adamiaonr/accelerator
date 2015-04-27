@@ -80,6 +80,14 @@ AC_ARG_ENABLE(asciidoc,
         no)  asciidoc=false ;;
         *) AC_MSG_ERROR(bad value for --disable-asciidoc) ;;
       esac], [asciidoc=true])
+      
+AC_ARG_ENABLE(mtcp,
+     AS_HELP_STRING(--enable-mtcp, compile Tor with mTCP's user-level stack),
+     [case "${enableval}" in
+        yes) mtcp=true ;;
+        no)  mtcp=false ;;
+        *) AC_MSG_ERROR(bad value for --enable-mtcp) ;;
+      esac], [mtcp=false])
 
 # By default, we're not ready to ship a NAT-PMP aware Tor
 AC_ARG_ENABLE(nat-pmp,
@@ -1310,6 +1318,11 @@ fi
 if test "$tor_cv_sign_extend" != no ; then
   AC_DEFINE([RSHIFT_DOES_SIGN_EXTEND], 1,
             [Define to 1 iff right-shifting a negative value performs sign-extension])
+fi
+
+# let's force mTCP stuff to compile
+if [[ $mtcp -eq 1 ]]; then
+  AC_DEFINE(USE_MTCP, 1, [use mTCP user-level TCP stack])
 fi
 
 # Whether we should use the dmalloc memory allocation debugging library.
