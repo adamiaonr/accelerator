@@ -15,13 +15,17 @@ TOR_BINARY=tor
 
 NODE_IPS=("172.31.100.10" "172.31.100.20" "172.31.100.30" "172.31.100.40")
 NODE_NAMES=("node1" "node2" "node3" "node4")
+NODE_INSTANCES=('i-b58aa97c' 'i-5e735197' 'i-d470521d' 'i-2c7052e5')
 
 usage () {
-    echo "usage: ./tor-setup.sh [-p <.pem file> || -f <torrc file> || --with-tcp-dump || --with-inet-connection]"
+    echo "usage: ./tor-setup.sh [-p <.pem file> || -f <torrc file> || --with-tcp-dump || --with-inet-connection || --start-instances || --stop-instances]"
 }
 
 W_TCP_DUMP=0
 W_INET_CONNECTION=0
+
+START_INSTANCES=0
+STOP_INSTANCES=0
 
 while [ "$1" != "" ]; do
     
@@ -37,6 +41,10 @@ while [ "$1" != "" ]; do
 										;;
 		-i | --with-inet-connection )	W_INET_CONNECTION=1
 										;;
+		--start-instances )				START_INSTANCES=1
+										;;
+		--stop-instances )				STOP_INSTANCES=1
+										;;
 		-h | --help	)					usage
 										exit
 										;;
@@ -46,6 +54,32 @@ while [ "$1" != "" ]; do
 		shift
 
 done
+
+# 1) start or stop AWS EC2 instances
+if [[ $START_INSTANCES -eq 1 ]]; then
+	
+	for INSTANCE in ${NODE_INSTANCES[@]}; do
+
+		echo $INSTANCE
+		ec2-start-instances $INSTANCE
+	done
+
+	# give them a bit of time to wake up...
+	sleep 10
+
+elif [[ $STOP_INSTANCES -eq 1 ]]; then
+	
+	for INSTANCE in ${NODE_INSTANCES[@]}; do
+
+		ec2-stop-instances $INSTANCE
+	done	
+
+	# no point going on...
+	exit 0
+fi
+
+START_INSTANCES=0
+STOP_INSTANCES=0
 
 # 1) if specified, setup node-gw as an Internet gateway for the private Tor 
 # network
