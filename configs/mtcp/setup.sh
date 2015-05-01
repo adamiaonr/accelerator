@@ -39,11 +39,11 @@ while [ "$1" != "" ]; do
                                 ;;
         -m | --build_mtcp )     BUILD_MTCP=1
                                 ;;
-        -t | --build_tor )	BUILD_TOR=1
-				;;
-	-h | --help	)	usage
-        			exit
-        			;;
+        -t | --build_tor )      BUILD_TOR=1
+                                ;;
+        -h | --help	)           usage
+                                exit
+                                ;;
         * )                     usage
                                 exit 1
     esac
@@ -145,12 +145,15 @@ if [ $BUILD_MTCP -eq 1 ]; then
 
     # 3.3) compile mTCP
     cd $MTCP_HOME/mtcp/src
+    make clean
     make
 
     cd $MTCP_HOME/util
+    make clean
     make
 
     cd $MTCP_HOME/apps/example
+    make clean
     make
 fi
 
