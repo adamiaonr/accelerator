@@ -232,6 +232,9 @@ AC_PATH_PROGS([A2X], [a2x a2x.py], none)
 
 AM_CONDITIONAL(USE_ASCIIDOC, test x$asciidoc = xtrue)
 
+# mTCP stuff
+AM_CONDITIONAL(USE_MTCP, test x$mtcp = xtrue)
+
 AM_CONDITIONAL(USE_FW_HELPER, test x$natpmp = xtrue || test x$upnp = xtrue)
 AM_CONDITIONAL(NAT_PMP, test x$natpmp = xtrue)
 AM_CONDITIONAL(MINIUPNPC, test x$upnp = xtrue)
@@ -733,6 +736,11 @@ dnl for us, as GCC 4.6 and later do at many optimization levels), then
 dnl we should try to add -fasynchronous-unwind-tables so that our backtrace
 dnl code will work.
 TOR_CHECK_CFLAGS(-fasynchronous-unwind-tables)
+
+# mTCP stuff
+if test "$mtcp" = "true"; then
+	AC_DEFINE(USE_MTCP, 1, [use mTCP user-level TCP stack])
+fi
 
 dnl ------------------------------------------------------
 dnl Where do you live, libnatpmp?  And how do we call you?
@@ -1318,11 +1326,6 @@ fi
 if test "$tor_cv_sign_extend" != no ; then
   AC_DEFINE([RSHIFT_DOES_SIGN_EXTEND], 1,
             [Define to 1 iff right-shifting a negative value performs sign-extension])
-fi
-
-# let's force mTCP stuff to compile
-if [[ $mtcp -eq 1 ]]; then
-  AC_DEFINE(USE_MTCP, 1, [use mTCP user-level TCP stack])
 fi
 
 # Whether we should use the dmalloc memory allocation debugging library.
