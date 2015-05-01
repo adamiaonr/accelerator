@@ -10,6 +10,8 @@
 # created by: antonior@andrew.cmu.edu
 
 #!/bin/bash
+
+# mTCP dirs and stuff
 MTCP_CONFIGS=/home/$USER/workbench/accelerator/configs/mtcp
 MTCP_HOME=/home/$USER/workbench/accelerator/lib/mtcp
 MTCP_DPDK=$MTCP_HOME/dpdk-1.8.0
@@ -18,8 +20,11 @@ MTCP_DPDK_RTE_TARGET=$MTCP_DPDK/$MTCP_DPDK_RTE_TARGET_VERSION
 MTCP_DPDK_NIC_BIND_TOOL=$MTCP_DPDK/tools/dpdk_nic_bind.py
 MTCP_DPDK_BUILD_CONFIG=config
 
+# Tor dirs and stuff
+TOR_HOME=/home/$USER/workbench/accelerator/tor/
+
 usage () {
-    echo "usage: sudo ./setup.sh [[-n value OR --nr_hugepages value] [-d OR --build_dpdk] [-m OR --build_mtcp] ] | [-h]]"
+    echo "usage: ./setup.sh [[-n value OR --nr_hugepages value] [-d OR --build_dpdk] [-m OR --build_mtcp] [-t OR --build_tor] ] | [-h]]"
 }
 
 HUGETLBFS_DIR="/mnt/huge"
@@ -27,6 +32,7 @@ HUGETLBFS_NR=320
 
 BUILD_DPDK=0
 BUILD_MTCP=0
+BUILD_TOR=0
 
 while [ "$1" != "" ]; do
     
@@ -39,9 +45,9 @@ while [ "$1" != "" ]; do
                                 ;;
         -m | --build_mtcp )     BUILD_MTCP=1
                                 ;;
-        -t | --build_tor )      BUILD_TOR=1
+        -t | --build_tor)       BUILD_TOR=1
                                 ;;
-        -h | --help	)           usage
+        -h | --help )           usage
                                 exit
                                 ;;
         * )                     usage
@@ -128,12 +134,12 @@ cd $MTCP_HOME/dpdk
 sudo ln -s $MTCP_DPDK_RTE_TARGET/lib lib
 sudo ln -s $MTCP_DPDK_RTE_TARGET/include include
 
-# 3) setup mTCP lib
-cd $MTCP_HOME
-
-# 3.1) ./configure
+# 3) setup mTCP
 if [ $BUILD_MTCP -eq 1 ]; then
 
+    cd $MTCP_HOME
+
+    # 3.1) ./configure
     ./configure --with-dpdk-lib=$MTCP_HOME/dpdk
 
     # 3.2) copy patched makefiles (basically, for compilation of mTCP in i686, 
@@ -155,6 +161,20 @@ if [ $BUILD_MTCP -eq 1 ]; then
     cd $MTCP_HOME/apps/example
     make clean
     make
+fi
+
+# 4) setup Tor
+if [ $BUILD_TOR -eq 1 ]; then
+
+    cd $TOR_HOME
+
+    if [[ -f Makefile ]]; then
+        make distclean
+    fi
+
+    # run configure with --enable-mtcp (--disable-asciidoc simply disables 
+    # some documentation stuff...
+    ./autogen.sh; ./configure --enable-mtcp --disable-asciidoc; make;
 fi
 
 exit 0
