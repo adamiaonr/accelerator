@@ -21,7 +21,8 @@ MTCP_DPDK_NIC_BIND_TOOL=$MTCP_DPDK/tools/dpdk_nic_bind.py
 MTCP_DPDK_BUILD_CONFIG=config
 
 # Tor dirs and stuff
-TOR_HOME=/home/$USER/workbench/accelerator/tor/
+TOR_HOME=/home/$USER/workbench/accelerator/tor
+TOR_CONFIGS=/home/$USER/workbench/accelerator/configs/tor
 
 usage () {
     echo "usage: ./setup.sh [[-n value OR --nr_hugepages value] [-d OR --build_dpdk] [-m OR --build_mtcp] [-t OR --build_tor] ] | [-h]]"
@@ -168,11 +169,14 @@ if [ $BUILD_TOR -eq 1 ]; then
 
     cd $TOR_HOME
 
+    # 4.1) copy mTCP-related config file for mTCP initialization
+    cp $TOR_CONFIGS/tor-mtcp.conf $TOR_HOME/src/or/
+
     if [[ -f Makefile ]]; then
         make distclean
     fi
 
-    # run configure with --enable-mtcp (--disable-asciidoc simply disables 
+    # 4.2) run configure with --enable-mtcp (--disable-asciidoc simply disables 
     # some documentation stuff...
     ./autogen.sh; ./configure --enable-mtcp --disable-asciidoc; make;
 fi
