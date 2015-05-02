@@ -1071,6 +1071,31 @@ socket_accounting_unlock(void)
   tor_mutex_release(socket_accounting_mutex);
 }
 
+#ifdef USE_MTCP
+/** tor 'wrapper' for mtcp_close()
+ *
+ */
+int tor_close_mtcp_socket(struct thread_context * mtcp_thread_ctx, tor_socket_t s)
+{
+	// XXX: mTCP changes: there's also an mTCP way of closing sockets
+	int r = mtcp_close(mtcp_thread_ctx->mctx, s);
+
+	if (r != 0) {
+
+		int err = tor_socket_errno(-1);
+		log_info(
+				LD_NET,
+				"(tor + mTCP): mtcp_close returned an error: %s",
+				tor_socket_strerror(err));
+
+		return err;
+	}
+
+	return r;
+}
+
+#endif //	XXX: mTCP
+
 /** As close(), but guaranteed to work for sockets across platforms (including
  * Windows, where close()ing a socket doesn't work.  Returns 0 on success and
  * the socket error code on failure. */
@@ -1100,30 +1125,6 @@ tor_close_socket_simple(tor_socket_t s)
 
   return r;
 }
-
-#ifdef USE_MTCP
-/** tor 'wrapper' for mtcp_close()
- *
- */
-int tor_close_socket(struct thread_context * mtcp_thread_ctx, tor_socket_t s)
-{
-	// XXX: mTCP changes: there's also an mTCP way of closing sockets
-	int r = mtcp_close(mtcp_thread_ctx->mctx, s);
-
-	if (r != 0) {
-
-		int err = tor_socket_errno(-1);
-		log_info(
-				LD_NET,
-				"(tor + mTCP): mtcp_close returned an error: %s",
-				tor_socket_strerror(err));
-
-		return err;
-	}
-
-	return r;
-}
-#endif
 
 /** As tor_close_socket_simple(), but keeps track of the number
  * of open sockets. Returns 0 on success, -1 on failure. */
@@ -1193,13 +1194,13 @@ mark_socket_open(tor_socket_t s)
 
 #ifdef USE_MTCP
 /** As socket(), but counts the number of open sockets. */
-tor_socket_t tor_open_socket(
+tor_socket_t tor_open_mtcp_socket(
 		struct thread_context * mtcp_thread_ctx,
 		int domain,
 		int type,
 		int protocol)
 {
-	return tor_open_socket_with_extensions(
+	return tor_open_mtcp_socket_with_extensions(
 			mtcp_thread_ctx,
 			domain,
 			type,
@@ -1209,13 +1210,13 @@ tor_socket_t tor_open_socket(
 
 /** As socket(), but creates a nonblocking socket and
  * counts the number of open sockets. */
-tor_socket_t tor_open_socket_nonblocking(
+tor_socket_t tor_open_mtcp_socket_nonblocking(
 		struct thread_context * mtcp_thread_ctx,
 		int domain,
 		int type,
 		int protocol)
 {
-  return tor_open_socket_with_extensions(
+  return tor_open_mtcp_socket_with_extensions(
 			mtcp_thread_ctx,
 			domain,
 			type,
@@ -1227,7 +1228,7 @@ tor_socket_t tor_open_socket_nonblocking(
  * socket creation with either of SOCK_CLOEXEC and SOCK_NONBLOCK specified.
  * <b>cloexec</b> and <b>nonblock</b> should be either 0 or 1 to indicate
  * if the corresponding extension should be used.*/
-tor_socket_t tor_open_socket_with_extensions(
+tor_socket_t tor_open_mtcp_socket_with_extensions(
 		struct thread_context * mtcp_thread_ctx,
 		int domain,
 		int type,
@@ -1329,7 +1330,8 @@ tor_socket_t tor_open_socket_with_extensions(
 
 	return s;
 }
-#else
+
+#endif	// XXX: USE_MTCP
 
 /** As socket(), but counts the number of open sockets. */
 tor_socket_t
@@ -1404,18 +1406,17 @@ tor_open_socket_with_extensions(int domain, int type, int protocol,
 
 	return s;
 }
-#endif	// XXX: USE_MTCP
 
 #ifdef USE_MTCP
 
 /** As accept(), but counts the number of open sockets. */
-tor_socket_t tor_accept_socket(
+tor_socket_t tor_accept_mtcp_socket(
 		struct thread_context * mtcp_thread_ctx,
 		tor_socket_t sockfd,
 		struct sockaddr * addr,
 		socklen_t * len)
 {
-	return tor_accept_socket_with_extensions(
+	return tor_accept_mtcp_socket_with_extensions(
 			mtcp_thread_ctx,
 			sockfd,
 			addr,
@@ -1425,13 +1426,13 @@ tor_socket_t tor_accept_socket(
 
 /** As accept(), but returns a nonblocking socket and
  * counts the number of open sockets. */
-tor_socket_t tor_accept_socket_nonblocking(
+tor_socket_t tor_accept_mtcp_socket_nonblocking(
 		struct thread_context * mtcp_thread_ctx,
 		tor_socket_t sockfd,
 		struct sockaddr * addr,
 		socklen_t *len)
 {
-	return tor_accept_socket_with_extensions(
+	return tor_accept_mtcp_socket_with_extensions(
 			mtcp_thread_ctx,
 			sockfd,
 			addr,
@@ -1443,7 +1444,7 @@ tor_socket_t tor_accept_socket_nonblocking(
  * socket creation with either of SOCK_CLOEXEC and SOCK_NONBLOCK specified.
  * <b>cloexec</b> and <b>nonblock</b> should be either 0 or 1 to indicate
  * if the corresponding extension should be used.*/
-tor_socket_t tor_accept_socket_with_extensions(
+tor_socket_t tor_accept_mtcp_socket_with_extensions(
 		struct thread_context * mtcp_thread_ctx,
 		tor_socket_t sockfd,
 		struct sockaddr * addr,
@@ -1573,7 +1574,7 @@ tor_socket_t tor_accept_socket_with_extensions(
 	return s;
 }
 
-#else
+#endif	// XXX: USE_MTCP
 
 /** As accept(), but counts the number of open sockets. */
 tor_socket_t
@@ -1648,7 +1649,6 @@ tor_accept_socket_with_extensions(tor_socket_t sockfd, struct sockaddr *addr,
 
 	return s;
 }
-#endif	// XXX: USE_MTCP
 
 /** Return the number of sockets we currently have opened. */
 int

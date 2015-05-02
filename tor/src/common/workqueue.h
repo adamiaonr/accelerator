@@ -6,6 +6,10 @@
 
 #include "compat.h"
 
+#ifdef USE_MTCP
+#include "tor_mtcp.h"
+#endif
+
 /** A replyqueue is used to tell the main thread about the outcome of
  * work that we queued for the the workers. */
 typedef struct replyqueue_s replyqueue_t;
@@ -40,7 +44,18 @@ threadpool_t *threadpool_new(int n_threads,
                              void *arg);
 replyqueue_t *threadpool_get_replyqueue(threadpool_t *tp);
 
+#ifdef USE_MTCP
+
+replyqueue_t *replyqueue_new(
+		struct thread_context * mtcp_thread_ctx,
+		uint32_t alertsocks_flags);
+
+#else
+
 replyqueue_t *replyqueue_new(uint32_t alertsocks_flags);
+
+#endif
+
 tor_socket_t replyqueue_get_socket(replyqueue_t *rq);
 void replyqueue_process(replyqueue_t *queue);
 

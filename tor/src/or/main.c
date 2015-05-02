@@ -103,6 +103,12 @@ static int connection_should_read_from_linked_conn(connection_t *conn);
 /********** mTCP VARIABLES **********/
 #ifdef USE_MTCP
 struct thread_context * mtcp_thread_ctx;
+
+// XXX: mTCP changes: using uthash (http://troydhanson.github.io/uthash/) to
+// make the connection_t struct hash table. this is necessary so that we can
+// identify connection_t objects by their socket fds and handle read and
+// write events on main.c.
+struct connection_t * connection_list = NULL;
 #endif
 
 /********* START VARIABLES **********/
@@ -269,6 +275,29 @@ note_that_we_maybe_cant_complete_circuits(void)
   can_complete_circuits = 0;
 }
 
+#ifdef USE_MTCP
+
+void add_connection(struct connection_t * conn) {
+
+	HASH_ADD_INT(connection_list, s, conn);
+}
+
+struct connection_t * find_connection(int sock_id) {
+
+	struct connection_t * conn;
+
+	HASH_FIND_INT(connection_list, &sock_id, conn);
+
+	return conn;
+}
+
+void delete_connection(struct connection_t * conn) {
+
+	HASH_DEL(connection_list, conn);
+}
+
+#endif
+
 /** Add <b>conn</b> to the array of connections that we can poll on.  The
  * connection's socket must be set; the connection starts out
  * non-reading and non-writing.
@@ -352,6 +381,14 @@ connection_add_impl(connection_t *conn, int is_connecting)
 
 	// XXX: mTCP changes: if mTCP is used, the 'read' and 'write' events on
 	// connections will have to follow mTCP's mtcp_epoll interface
+
+	// XXX: mTCP changes: ok, so now we have the following problem:
+	//	-# tor 'indexes' read and write events via connection_t pointers
+	//	-# mTCP 'indexes' read and write events via the associated socket fds
+	//
+	// how do we solve this? let's keep a hash table, which maps conn->s
+	// socket file descriptors to connection_t pointers as part of main.c, and
+	// call it inside the for(;;) loop in do_main_loop().
 	conn->read_event =
 			tor_mtcp_event_new(
 					mtcp_thread_ctx->mctx,
@@ -365,6 +402,9 @@ connection_add_impl(connection_t *conn, int is_connecting)
 					mtcp_thread_ctx->ep,
 					MTCP_EPOLLOUT,
 					conn->s);
+
+	add_connection(conn);
+
 #else
     conn->read_event = tor_event_new(tor_libevent_get_base(),
          conn->s, EV_READ|EV_PERSIST, conn_read_callback, conn);
@@ -383,19 +423,34 @@ connection_add_impl(connection_t *conn, int is_connecting)
 
 /** Tell libevent that we don't care about <b>conn</b> any more. */
 void
-connection_unregister_events(connection_t *conn)
+connection_unregister_events(connection_t * conn)
 {
-	// XXX: mTCP changes: will only free the memory allocated to read and
-	// write events in tor_mtcp_event_new(), i.e. no 'mTCP mumbo jumbo'
+	// XXX: mTCP changes: w/ 'mTCP mumbo jumbo'
 	// such as mtcp_epoll_ctl(MTCP_EPOLL_CTL_DEL) and stuff... which may
 	// need to be done in the future
 #ifdef USE_MTCP
 
 	if (conn->read_event) {
+
+		mtcp_epoll_ctl(
+				conn->mtcp_thread_ctx->mctx,
+				conn->mtcp_thread_ctx->ep,
+				MTCP_EPOLL_CTL_DEL,
+				conn->s,
+				conn->read_event);
+
 		tor_free(conn->read_event);
 	}
 
 	if (conn->write_event) {
+
+		mtcp_epoll_ctl(
+				conn->mtcp_thread_ctx->mctx,
+				conn->mtcp_thread_ctx->ep,
+				MTCP_EPOLL_CTL_DEL,
+				conn->s,
+				conn->write_event);
+
 		tor_free(conn->write_event);
 	}
 
@@ -432,6 +487,13 @@ connection_unregister_events(connection_t *conn)
 int
 connection_remove(connection_t *conn)
 {
+
+// XXX: mTCP changes: if mTCP is in use, remove the sockid::connection_t *
+// mapping from the connection_list utash table.
+#ifdef USE_MTCP
+	delete_connection(conn);
+#endif
+
   int current_index;
   connection_t *tmp;
 
@@ -608,11 +670,18 @@ connection_is_reading(connection_t *conn)
 {
   tor_assert(conn);
 
+#ifdef USE_MTCP
+
+	// XXX: mTCP changes: notice the removal of event_pending()
+	return conn->reading_from_linked_conn || (conn->read_event);
+
+#else
   IF_HAS_BUFFEREVENT(conn,
     return (bufferevent_get_enabled(conn->bufev) & EV_READ) != 0;
   );
   return conn->reading_from_linked_conn ||
     (conn->read_event && event_pending(conn->read_event, EV_READ, NULL));
+#endif
 }
 
 /** Tell the main loop to stop notifying <b>conn</b> of any read events. */
@@ -620,6 +689,35 @@ MOCK_IMPL(void,
 connection_stop_reading,(connection_t *conn))
 {
   tor_assert(conn);
+
+#ifdef USE_MTCP
+
+	tor_assert(conn->read_event);
+
+	if (conn->linked) {
+
+		conn->reading_from_linked_conn = 0;
+		connection_stop_reading_from_linked_conn(conn);
+
+	} else {
+
+		int res = mtcp_epoll_ctl(
+				conn->mtcp_thread_ctx->mctx,
+				conn->mtcp_thread_ctx->ep,
+				MTCP_EPOLL_CTL_DEL,
+				conn->s,
+				conn->read_event);
+
+		if (res < 0) {
+
+			log_warn(LD_NET, "(tor + mTCP) Error from mtcp_epoll while "
+					"MTCP_EPOLL_CTL_DELeting read event %d (errno: %s)",
+					(int) conn->s,
+					tor_socket_strerror(tor_socket_errno(conn->s)));
+		}
+	}
+
+#else
 
   IF_HAS_BUFFEREVENT(conn, {
       bufferevent_disable(conn->bufev, EV_READ);
@@ -638,39 +736,83 @@ connection_stop_reading,(connection_t *conn))
                (int)conn->s,
                tor_socket_strerror(tor_socket_errno(conn->s)));
   }
+
+#endif
 }
 
 /** Tell the main loop to start notifying <b>conn</b> of any read events. */
 MOCK_IMPL(void,
-connection_start_reading,(connection_t *conn))
+connection_start_reading,(connection_t * conn))
 {
-  tor_assert(conn);
+	tor_assert(conn);
 
-  IF_HAS_BUFFEREVENT(conn, {
-      bufferevent_enable(conn->bufev, EV_READ);
-      return;
-  });
+#ifdef USE_MTCP
 
-  tor_assert(conn->read_event);
+	tor_assert(conn->read_event);
 
-  if (conn->linked) {
-    conn->reading_from_linked_conn = 1;
-    if (connection_should_read_from_linked_conn(conn))
-      connection_start_reading_from_linked_conn(conn);
-  } else {
-    if (event_add(conn->read_event, NULL))
-      log_warn(LD_NET, "Error from libevent setting read event state for %d "
-               "to watched: %s",
-               (int)conn->s,
-               tor_socket_strerror(tor_socket_errno(conn->s)));
-  }
+	if (conn->linked) {
+
+		conn->reading_from_linked_conn = 1;
+
+		if (connection_should_read_from_linked_conn(conn)) {
+
+			connection_start_reading_from_linked_conn(conn);
+		}
+
+	} else {
+
+		int res = mtcp_epoll_ctl(
+				conn->mtcp_thread_ctx->mctx,
+				conn->mtcp_thread_ctx->ep,
+				MTCP_EPOLL_CTL_ADD,
+				conn->s,
+				conn->read_event);
+
+		if (res < 0) {
+
+			log_warn(LD_NET, "(tor + mTCP) Error from mtcp_epoll while "
+					"MTCP_EPOLL_CTL_ADDing read event %d (errno: %s)",
+					(int) conn->s,
+					tor_socket_strerror(tor_socket_errno(conn->s)));
+		}
+	}
+
+#else
+
+	  IF_HAS_BUFFEREVENT(conn, {
+	      bufferevent_enable(conn->bufev, EV_READ);
+	      return;
+	  });
+
+	  tor_assert(conn->read_event);
+
+	  if (conn->linked) {
+	    conn->reading_from_linked_conn = 1;
+	    if (connection_should_read_from_linked_conn(conn))
+	      connection_start_reading_from_linked_conn(conn);
+	  } else {
+	    if (event_add(conn->read_event, NULL))
+	      log_warn(LD_NET, "Error from libevent setting read event state for %d "
+	               "to watched: %s",
+	               (int)conn->s,
+	               tor_socket_strerror(tor_socket_errno(conn->s)));
+	  }
+
+#endif
 }
 
 /** Return true iff <b>conn</b> is listening for write events. */
 int
 connection_is_writing(connection_t *conn)
 {
-  tor_assert(conn);
+	tor_assert(conn);
+
+#ifdef USE_MTCP
+
+	// XXX: mTCP changes: notice the removal of event_pending()
+	return conn->writing_to_linked_conn || (conn->write_event);
+
+#else
 
   IF_HAS_BUFFEREVENT(conn,
     return (bufferevent_get_enabled(conn->bufev) & EV_WRITE) != 0;
@@ -678,13 +820,47 @@ connection_is_writing(connection_t *conn)
 
   return conn->writing_to_linked_conn ||
     (conn->write_event && event_pending(conn->write_event, EV_WRITE, NULL));
+#endif
+
 }
 
 /** Tell the main loop to stop notifying <b>conn</b> of any write events. */
 MOCK_IMPL(void,
 connection_stop_writing,(connection_t *conn))
 {
-  tor_assert(conn);
+
+	tor_assert(conn);
+
+#ifdef USE_MTCP
+
+	tor_assert(conn->write_event);
+
+	if (conn->linked) {
+
+		conn->writing_to_linked_conn = 0;
+
+		if (conn->linked_conn)
+			connection_stop_reading_from_linked_conn(conn->linked_conn);
+
+	} else {
+
+		int res = mtcp_epoll_ctl(
+				conn->mtcp_thread_ctx->mctx,
+				conn->mtcp_thread_ctx->ep,
+				MTCP_EPOLL_CTL_DEL,
+				conn->s,
+				conn->write_event);
+
+		if (res < 0) {
+
+			log_warn(LD_NET, "(tor + mTCP) Error from mtcp_epoll while "
+					"MTCP_EPOLL_CTL_DELeting write event %d (errno: %s)",
+					(int) conn->s,
+					tor_socket_strerror(tor_socket_errno(conn->s)));
+		}
+	}
+
+#else
 
   IF_HAS_BUFFEREVENT(conn, {
       bufferevent_disable(conn->bufev, EV_WRITE);
@@ -704,6 +880,9 @@ connection_stop_writing,(connection_t *conn))
                (int)conn->s,
                tor_socket_strerror(tor_socket_errno(conn->s)));
   }
+
+#endif
+
 }
 
 /** Tell the main loop to start notifying <b>conn</b> of any write events. */
@@ -711,6 +890,40 @@ MOCK_IMPL(void,
 connection_start_writing,(connection_t *conn))
 {
   tor_assert(conn);
+
+#ifdef USE_MTCP
+
+	tor_assert(conn->read_event);
+
+	if (conn->linked) {
+
+		conn->writing_to_linked_conn = 1;
+
+		if (conn->linked_conn &&
+				connection_should_read_from_linked_conn(conn->linked_conn)) {
+
+			connection_start_reading_from_linked_conn(conn->linked_conn);
+		}
+
+	} else {
+
+		int res = mtcp_epoll_ctl(
+				conn->mtcp_thread_ctx->mctx,
+				conn->mtcp_thread_ctx->ep,
+				MTCP_EPOLL_CTL_ADD,
+				conn->s,
+				conn->write_event);
+
+		if (res < 0) {
+
+			log_warn(LD_NET, "(tor + mTCP) Error from mtcp_epoll while "
+					"MTCP_EPOLL_CTL_ADDing write event %d (errno: %s)",
+					(int) conn->s,
+					tor_socket_strerror(tor_socket_errno(conn->s)));
+		}
+	}
+
+#else
 
   IF_HAS_BUFFEREVENT(conn, {
       bufferevent_enable(conn->bufev, EV_WRITE);
@@ -731,6 +944,9 @@ connection_start_writing,(connection_t *conn))
                (int)conn->s,
                tor_socket_strerror(tor_socket_errno(conn->s)));
   }
+
+#endif
+
 }
 
 /** Return true iff <b>conn</b> is linked conn, and reading from the conn
@@ -961,7 +1177,13 @@ conn_close_if_marked(int i)
       } else
         retval = -1; /* never flush non-open broken tls connections */
     } else {
-      retval = flush_buf(conn->s, conn->outbuf, sz, &conn->outbuf_flushlen);
+#ifdef USE_MTCP
+		retval = flush_buf(
+							conn->mtcp_thread_ctx,
+							conn->s, conn->outbuf, sz, &conn->outbuf_flushlen);
+#else
+		retval = flush_buf(conn->s, conn->outbuf, sz, &conn->outbuf_flushlen);
+#endif
     }
     if (retval >= 0 && /* Technically, we could survive things like
                           TLS_WANT_WRITE here. But don't bother for now. */
@@ -1597,7 +1819,13 @@ run_scheduled_events(time_t now)
 
   /* 3d. And every 60 seconds, we relaunch listeners if any died. */
   if (!net_is_disabled() && time_to_check_listeners < now) {
-    retry_all_listeners(NULL, NULL, 0);
+
+#ifdef USE_MTCP
+	    retry_all_listeners(mtcp_thread_ctx, NULL, NULL, 0);
+#else
+	    retry_all_listeners(NULL, NULL, 0);
+#endif
+
     time_to_check_listeners = now+60;
   }
 
@@ -1947,7 +2175,11 @@ do_hup(void)
   /* first, reload config variables, in case they've changed */
   if (options->ReloadTorrcOnSIGHUP) {
     /* no need to provide argc/v, they've been cached in init_from_config */
-    if (options_init_from_torrc(0, NULL) < 0) {
+#ifdef USE_MTCP
+	    if (options_init_from_torrc(mtcp_thread_ctx, 0, NULL) < 0) {
+#else
+	    if (options_init_from_torrc(0, NULL) < 0) {
+#endif
       log_err(LD_CONFIG,"Reading config failed--see warnings above. "
               "For usage, try -h.");
       return -1;
@@ -1962,7 +2194,12 @@ do_hup(void)
     log_notice(LD_GENERAL, "Not reloading config file: the controller told "
                "us not to.");
     /* Make stuff get rescanned, reloaded, etc. */
-    if (set_options((or_options_t*)options, &msg) < 0) {
+#ifdef USE_MTCP
+		if (set_options(mtcp_thread_ctx, (or_options_t*)options, &msg) < 0) {
+#else
+		if (set_options((or_options_t*)options, &msg) < 0) {
+#endif
+
       if (!msg)
         msg = tor_strdup("Unknown error");
       log_warn(LD_GENERAL, "Unable to re-set previous options: %s", msg);
@@ -2006,6 +2243,10 @@ int
 do_main_loop(void)
 {
   int loop_result;
+
+  // XXX: mTCP changes: for mTCP mtcp_epoll_wait() loop
+  int mtcp_loop_result;
+
   time_t now;
 
   /* initialize dns resolve map, spawn workers if needed */
@@ -2065,8 +2306,13 @@ do_main_loop(void)
   directory_info_has_arrived(now, 1);
 
   if (server_mode(get_options())) {
-    /* launch cpuworkers. Need to do this *after* we've read the onion key. */
+
+	  /* launch cpuworkers. Need to do this *after* we've read the onion key. */
+#ifdef USE_MTCP
+    cpu_init(mtcp_thread_ctx);
+#else
     cpu_init();
+#endif
   }
 
   /* set up once-a-second callback. */
@@ -2143,19 +2389,103 @@ do_main_loop(void)
     errno = 0;
 #endif
     /* All active linked conns should get their read events activated. */
-    SMARTLIST_FOREACH(active_linked_connection_lst, connection_t *, conn,
-                      event_active(conn->read_event, EV_READ, 1));
+#ifdef USE_MTCP
+
+    // XXX: mTCP changes: apparently mTCP doesn't have an equivalent to
+    // event_active(), so won't do anything here...
+//    SMARTLIST_FOREACH(
+//    		active_linked_connection_lst,
+//			connection_t *,
+//			conn,
+//			event_active(conn->read_event, EV_READ, 1));
+
     called_loop_once = smartlist_len(active_linked_connection_lst) ? 1 : 0;
+
+#else
+
+    SMARTLIST_FOREACH(
+    		active_linked_connection_lst,
+			connection_t *,
+			conn,
+			event_active(conn->read_event, EV_READ, 1));
+
+    called_loop_once = smartlist_len(active_linked_connection_lst) ? 1 : 0;
+
+#endif
 
     update_approx_time(time(NULL));
 
     /* poll until we have an event, or the second ends, or until we have
      * some active linked connections to trigger events for. */
-    // TODO: mTCP changes: this seems to be the place where mtcp_epoll_wait()
-    // should be called. i guess this should happen IN PARALELL with
-    // event_base_loop() and NOT AS A REPLACEMENT.
+
     loop_result = event_base_loop(tor_libevent_get_base(),
                                   called_loop_once ? EVLOOP_ONCE : 0);
+
+    // FIXME: mTCP changes: this where stuff gets tricky. i've set the timeout of
+    // the mtcp_epoll_wait() function to 1 ms, which may affect performance.
+    // epserver.c uses a timeout of -1, which probably means 'block & wait'.
+    int ep = 0, ev_index = 0;
+	struct mtcp_epoll_event * events = NULL;
+
+    mtcp_loop_result = mtcp_epoll_wait(
+    									mtcp_thread_ctx->mctx,
+										ep,
+										events,
+										MAX_EVENTS,
+										1);
+
+    // XXX: mTCP changes: handle the result of mtcp_poll_wait() as in
+    // epserver.c and adapt it to our case here. since we're not using
+    // libevent (and hence not adding callbacks when registering events),
+    // we need to look through a list of active events, check their type,
+    // and call conn_read_callback() or conn_write_callback()
+
+	// XXX: mTCP changes: ok, so now we have the following problem:
+	//	-# tor 'indexes' read and write events via connection_t pointers
+	//	-# mTCP 'indexes' read and write events via the associated socket fds
+	//
+	// how do we solve this? let's keep a hash table, which maps conn->s
+	// socket file descriptors to connection_t pointers as part of main.c, and
+	// call it inside the for(;;) loop in do_main_loop().
+
+    if (mtcp_loop_result < 0) {
+
+		if (errno != EINTR) {
+
+	        log_err(
+	        		LD_NET,
+					"(tor + mTCP) mtcp_epoll_wait() error");
+
+	        return -1;
+		}
+
+    } else {
+
+    	for (ev_index = 0; ev_index < mtcp_loop_result; mtcp_loop_result++) {
+
+    		connection_t * conn = find_connection(events[ev_index].data.sockid);
+
+    		if (conn == NULL) continue;
+
+    		if (events[ev_index].events & MTCP_EPOLLIN) {
+
+    			conn_read_callback(0, 0, (void *) conn);
+
+    		} else if (events[ev_index].events & MTCP_EPOLLOUT) {
+
+    			conn_write_callback(0, 0, (void *) conn);
+
+    		} else {
+
+    			log_err(
+						LD_NET,
+						"(tor + mTCP) neither MTCP_EPOLLIN nor MTCP_EPOLLOUT: %d",
+						events[ev_index].events);
+
+    			assert(0);
+    		}
+    	}
+    }
 
     /* let catch() handle things like ^c, and otherwise don't worry about it */
     if (loop_result < 0) {
@@ -2501,15 +2831,15 @@ int tor_mtcp_init() {
 	// FIXME: will register tor's own signal handler, not sure if
 	// this is correct...
 	//mtcp_register_signal(SIGINT, SignalHandler);
-	mtcp_register_signal(SIGINT, process_signal);
+	//mtcp_register_signal(SIGINT, process_signal);
 
 	//TRACE_INFO("Application initialization finished.\n");
 	log_info(LD_GENERAL, "(tor + mTCP): application initialization finished.\n");
 
 	// FIXME: we assume tor runs on a single (1) thread, and that we only need
 	// 1 core, with index 0
-	num_cores = 1;
-	core = 0;
+	int num_cores = 1;
+	int core = 0;
 
 	/* affinitize application thread to a CPU core */
 #if HT_SUPPORT
@@ -2654,10 +2984,24 @@ tor_init(int argc, char *argv[])
   }
   atexit(exit_function);
 
-  if (options_init_from_torrc(argc,argv) < 0) {
-    log_err(LD_CONFIG,"Reading config failed--see warnings above.");
-    return -1;
-  }
+#ifdef USE_MTCP
+
+	if (options_init_from_torrc(mtcp_thread_ctx, argc, argv) < 0) {
+		log_err(
+				LD_CONFIG,
+				"(tor + mTCP) reading config failed: see warnings above.");
+
+		return -1;
+	}
+
+#else
+
+	if (options_init_from_torrc(argc, argv) < 0) {
+		log_err(LD_CONFIG,"Reading config failed--see warnings above.");
+		return -1;
+	}
+
+#endif
 
 #ifndef _WIN32
   if (geteuid()==0)

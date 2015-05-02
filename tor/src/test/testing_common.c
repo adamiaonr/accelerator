@@ -274,12 +274,13 @@ main(int c, const char **v)
   options_init(options);
   options->DataDirectory = tor_strdup(temp_dir);
   options->EntryStatistics = 1;
+#ifndef USE_MTCP
   if (set_options(options, &errmsg) < 0) {
     printf("Failed to set initial options: %s\n", errmsg);
     tor_free(errmsg);
     return 1;
   }
-
+#endif
   atexit(remove_directory);
 
   int have_failed = (tinytest_main(c, v, testgroups) != 0);

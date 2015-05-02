@@ -632,6 +632,8 @@ main(int argc, const char **argv)
   options->command = CMD_RUN_UNITTESTS;
   options->DataDirectory = tor_strdup("");
   options_init(options);
+
+#ifndef USE_MTCP
   if (set_options(options, &errmsg) < 0) {
     printf("Failed to set initial options: %s\n", errmsg);
     tor_free(errmsg);
@@ -645,6 +647,7 @@ main(int argc, const char **argv)
         b->fn();
     }
   }
+#endif
 
   return 0;
 }

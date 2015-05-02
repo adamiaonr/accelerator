@@ -144,7 +144,7 @@ struct mtcp_epoll_event * tor_mtcp_event_new(
 			listen_sock_fd,
 			mtcp_ev);
 
-	return mtcp_env;
+	return mtcp_ev;
 }
 
 #endif

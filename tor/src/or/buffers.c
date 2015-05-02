@@ -550,9 +550,18 @@ read_to_chunk_tls(buf_t *buf, chunk_t *chunk, tor_tls_t *tls,
  * error; else return the number of bytes read.
  */
 /* XXXX024 indicate "read blocked" somehow? */
+
+#ifdef USE_MTCP
+int
+read_to_buf(
+			struct thread_context * mtcp_thread_ctx,
+			tor_socket_t s, size_t at_most, buf_t *buf, int *reached_eof,
+            int *socket_error)
+#else
 int
 read_to_buf(tor_socket_t s, size_t at_most, buf_t *buf, int *reached_eof,
             int *socket_error)
+#endif
 {
   /* XXXX024 It's stupid to overload the return values for these functions:
    * "error status" and "number of bytes read" are not mutually exclusive.
@@ -578,7 +587,12 @@ read_to_buf(tor_socket_t s, size_t at_most, buf_t *buf, int *reached_eof,
         readlen = cap;
     }
 
+#ifdef USE_MTCP
+    r = read_to_chunk(mtcp_thread_ctx, buf, chunk, s, readlen, reached_eof, socket_error);
+#else
     r = read_to_chunk(buf, chunk, s, readlen, reached_eof, socket_error);
+#endif
+
     check();
     if (r < 0)
       return r; /* Error */
@@ -745,8 +759,14 @@ flush_chunk_tls(tor_tls_t *tls, buf_t *buf, chunk_t *chunk,
  * from the buffer.  Return the number of bytes written on success,
  * -1 on failure.  Return 0 if write() would block.
  */
+#ifdef USE_MTCP
+int flush_buf(
+		struct thread_context * mtcp_thread_ctx,
+		tor_socket_t s, buf_t *buf, size_t sz, size_t *buf_flushlen)
+#else
 int
 flush_buf(tor_socket_t s, buf_t *buf, size_t sz, size_t *buf_flushlen)
+#endif
 {
   /* XXXX024 It's stupid to overload the return values for these functions:
    * "error status" and "number of bytes flushed" are not mutually exclusive.
@@ -767,7 +787,12 @@ flush_buf(tor_socket_t s, buf_t *buf, size_t sz, size_t *buf_flushlen)
     else
       flushlen0 = buf->head->datalen;
 
+// XXX: mTCP changes: using mtcp_write() instead
+#ifdef USE_MTCP
+    r = flush_chunk(mtcp_thread_ctx, s, buf, buf->head, flushlen0, buf_flushlen);
+#else
     r = flush_chunk(s, buf, buf->head, flushlen0, buf_flushlen);
+#endif
     check();
     if (r < 0)
       return r;

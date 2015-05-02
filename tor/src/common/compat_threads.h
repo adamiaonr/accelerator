@@ -9,7 +9,10 @@
 #include "orconfig.h"
 #include "torint.h"
 #include "testsupport.h"
+
+#ifdef USE_MTCP
 #include "tor_mtcp.h"
+#endif
 
 #if defined(HAVE_PTHREAD_H) && !defined(_WIN32)
 #include <pthread.h>

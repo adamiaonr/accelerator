@@ -14,6 +14,10 @@
 
 #include "testsupport.h"
 
+#ifdef USE_MTCP
+#include "tor_mtcp.h"
+#endif
+
 buf_t *buf_new(void);
 buf_t *buf_new_with_capacity(size_t size);
 size_t buf_get_default_chunk_size(const buf_t *buf);
@@ -28,11 +32,26 @@ size_t buf_slack(const buf_t *buf);
 uint32_t buf_get_oldest_chunk_timestamp(const buf_t *buf, uint32_t now);
 size_t buf_get_total_allocation(void);
 
+#ifdef USE_MTCP
+
+int read_to_buf(
+				struct thread_context * mtcp_thread_ctx,
+				tor_socket_t s, size_t at_most, buf_t *buf, int *reached_eof,
+                int *socket_error);
+
+int flush_buf(
+				struct thread_context * mtcp_thread_ctx,
+				tor_socket_t s, buf_t *buf, size_t sz, size_t *buf_flushlen);
+
+#else
+
 int read_to_buf(tor_socket_t s, size_t at_most, buf_t *buf, int *reached_eof,
                 int *socket_error);
-int read_to_buf_tls(tor_tls_t *tls, size_t at_most, buf_t *buf);
-
 int flush_buf(tor_socket_t s, buf_t *buf, size_t sz, size_t *buf_flushlen);
+
+#endif
+
+int read_to_buf_tls(tor_tls_t *tls, size_t at_most, buf_t *buf);
 int flush_buf_tls(tor_tls_t *tls, buf_t *buf, size_t sz, size_t *buf_flushlen);
 
 int write_to_buf(const char *string, size_t string_len, buf_t *buf);

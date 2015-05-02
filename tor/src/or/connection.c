@@ -616,8 +616,16 @@ connection_free_(connection_t *conn)
   }
 
   /* Probably already freed by connection_free. */
-  tor_event_free(conn->read_event);
-  tor_event_free(conn->write_event);
+  // FIXME: mTCP changes: not sure if these tor_free() thingies are gonna
+  // work...
+#ifdef USE_MTCP
+	if (conn->read_event != NULL) tor_free(conn->read_event);
+	if (conn->write_event != NULL) tor_free(conn->write_event);
+#else
+	tor_event_free(conn->read_event);
+	tor_event_free(conn->write_event);
+#endif
+
   conn->read_event = conn->write_event = NULL;
   IF_HAS_BUFFEREVENT(conn, {
       /* This was a workaround to handle bugs in some old versions of libevent
@@ -647,7 +655,7 @@ connection_free_(connection_t *conn)
     log_debug(LD_NET,"closing fd %d.",(int)conn->s);
 
 #ifdef USE_MTCP
-    tor_close_socket(mtcp_thread_ctx, conn->s);
+    tor_close_mtcp_socket(conn->mtcp_thread_ctx, conn->s);
 #else
     tor_close_socket(conn->s);
 #endif
@@ -770,7 +778,7 @@ connection_close_immediate(connection_t *conn)
 
   if (SOCKET_OK(conn->s))
 #ifdef USE_MTCP
-    tor_close_socket(mtcp_thread_ctx, conn->s);
+    tor_close_mtcp_socket(conn->mtcp_thread_ctx, conn->s);
 #else
     tor_close_socket(conn->s);
 #endif
@@ -1155,7 +1163,7 @@ connection_listener_new(const struct sockaddr *listensockaddr,
                conn_type_to_string(type), fmt_addrport(&addr, usePort));
 
 #ifdef USE_MTCP
-	s = tor_open_socket_nonblocking(
+	s = tor_open_mtcp_socket_nonblocking(
 			mtcp_thread_ctx,
 			tor_addr_family(&addr),
 			is_stream ? SOCK_STREAM : SOCK_DGRAM,
@@ -1461,7 +1469,7 @@ connection_listener_new(const struct sockaddr *listensockaddr,
 	if (SOCKET_OK(s)) {
 // XXX: mTCP changes: closing sockets, the mTCP way
 #ifdef USE_MTCP
-		tor_close_socket(mtcp_thread_ctx, s);
+		tor_close_mtcp_socket(conn->mtcp_thread_ctx, s);
 #else
 		tor_close_socket(s);
 #endif
@@ -1585,7 +1593,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
                tor_socket_strerror(errno));
     }
 #ifdef USE_MTCP
-    tor_close_socket(mtcp_thread_ctx, news);
+    tor_close_mtcp_socket(conn->mtcp_thread_ctx, news);
 #else
     tor_close_socket(news);
 #endif
@@ -1597,7 +1605,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
 
   if (check_sockaddr_family_match(remote->sa_family, conn) < 0) {
 #ifdef USE_MTCP
-    tor_close_socket(mtcp_thread_ctx, news);
+    tor_close_mtcp_socket(conn->mtcp_thread_ctx, news);
 #else
     tor_close_socket(news);
 #endif
@@ -1612,7 +1620,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
       log_info(LD_NET,
                "accept() returned a strange address; closing connection.");
 #ifdef USE_MTCP
-    tor_close_socket(mtcp_thread_ctx, news);
+    tor_close_mtcp_socket(conn->mtcp_thread_ctx, news);
 #else
     tor_close_socket(news);
 #endif
@@ -1629,7 +1637,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
                    "Denying socks connection from untrusted address %s.",
                    fmt_and_decorate_addr(&addr));
 #ifdef USE_MTCP
-        tor_close_socket(mtcp_thread_ctx, news);
+        tor_close_mtcp_socket(conn->mtcp_thread_ctx, news);
 #else
         tor_close_socket(news);
 #endif
@@ -1642,7 +1650,7 @@ connection_handle_listener_read(connection_t *conn, int new_type)
         log_notice(LD_DIRSERV,"Denying dir connection from address %s.",
                    fmt_and_decorate_addr(&addr));
 #ifdef USE_MTCP
-        tor_close_socket(mtcp_thread_ctx, news);
+        tor_close_mtcp_socket(conn->mtcp_thread_ctx, news);
 #else
         tor_close_socket(news);
 #endif
@@ -1813,7 +1821,7 @@ connection_connect_sockaddr(connection_t *conn,
 
 	if (bindaddr &&
 			(mtcp_bind(
-					mtcp_thread_ctx->mctx,
+					conn->mtcp_thread_ctx->mctx,
 					s,
 					(struct sockaddr *) &bindaddr,
 					bindaddr_len) < 0)) {
@@ -1825,7 +1833,7 @@ connection_connect_sockaddr(connection_t *conn,
 				tor_socket_strerror(*socket_error));
 
 #ifdef USE_MTCP
-		tor_close_socket(mtcp_thread_ctx, s);
+		tor_close_mtcp_socket(conn->mtcp_thread_ctx, s);
 #else
 		tor_close_socket(s);
 #endif
@@ -1839,7 +1847,7 @@ connection_connect_sockaddr(connection_t *conn,
     log_warn(LD_NET,"Error binding network socket: %s",
              tor_socket_strerror(*socket_error));
 #ifdef USE_MTCP
-		tor_close_socket(mtcp_thread_ctx, s);
+		tor_close_mtcp_socket(conn->mtcp_thread_ctx, s);
 #else
 		tor_close_socket(s);
 #endif
@@ -1858,7 +1866,7 @@ connection_connect_sockaddr(connection_t *conn,
 	// code where connect() is called (even for TLS connections seem
 	// to end up here...).
 	if (mtcp_connect(
-			mtcp_thread_ctx->mctx,
+			conn->mtcp_thread_ctx->mctx,
 			s,
 			sa,
 			sa_len) < 0) {
@@ -1873,7 +1881,7 @@ connection_connect_sockaddr(connection_t *conn,
 					"(tor + mTCP): connect() to socket failed: %s",
 					tor_socket_strerror(e));
 
-			tor_close_socket(mtcp_thread_ctx, s);
+			tor_close_mtcp_socket(conn->mtcp_thread_ctx, s);
 
 			return -1;
 
@@ -2520,7 +2528,7 @@ connection_read_proxy_handshake(connection_t *conn)
  * Return 0 on success, -1 on failure.
  **/
 #ifdef USE_MTCP
-retry_listener_ports(
+static int retry_listener_ports(
 						struct thread_context * mtcp_thread_ctx,
 						smartlist_t *old_conns,
 						const smartlist_t *ports,
@@ -2660,12 +2668,10 @@ retry_listener_ports(smartlist_t *old_conns,
  * listeners, and we close all other listeners.
  */
 #ifdef USE_MTCP
-
 int retry_all_listeners(
 					struct thread_context * mtcp_thread_ctx,
 					smartlist_t *replaced_conns,
                     smartlist_t *new_conns, int close_all_noncontrol)
-
 #else
 int
 retry_all_listeners(smartlist_t *replaced_conns,
@@ -3786,9 +3792,28 @@ connection_read_to_buf(connection_t *conn, ssize_t *max_to_read,
   } else {
     /* !connection_speaks_cells, !conn->linked_conn. */
     int reached_eof = 0;
-    CONN_LOG_PROTECT(conn,
-        result = read_to_buf(conn->s, at_most, conn->inbuf, &reached_eof,
-                             socket_error));
+
+#ifdef USE_MTCP
+
+	CONN_LOG_PROTECT(
+			conn,
+			result = read_to_buf(
+								conn->mtcp_thread_ctx,
+								conn->s,
+								at_most,
+								conn->inbuf,
+								&reached_eof,socket_error));
+#else
+
+	CONN_LOG_PROTECT(
+			conn,
+			result = read_to_buf(
+								conn->s,
+								at_most,
+								conn->inbuf,
+								&reached_eof,socket_error));
+#endif
+
     if (reached_eof)
       conn->inbuf_reached_eof = 1;
 
@@ -4261,9 +4286,29 @@ connection_handle_write_impl(connection_t *conn, int force)
      * or something. */
     result = (int)(initial_size-buf_datalen(conn->outbuf));
   } else {
-    CONN_LOG_PROTECT(conn,
-             result = flush_buf(conn->s, conn->outbuf,
-                                max_to_write, &conn->outbuf_flushlen));
+
+#ifdef USE_MTCP
+
+	CONN_LOG_PROTECT(
+			conn,
+			result = flush_buf(
+								conn->mtcp_thread_ctx,
+								conn->s,
+								conn->outbuf,
+								max_to_write,
+								&conn->outbuf_flushlen));
+#else
+
+	CONN_LOG_PROTECT(
+			conn,
+			result = flush_buf(
+								conn->s,
+								conn->outbuf,
+								max_to_write,
+								&conn->outbuf_flushlen));
+
+#endif
+
     if (result < 0) {
       if (CONN_IS_EDGE(conn))
         connection_edge_end_errno(TO_EDGE_CONN(conn));

@@ -358,7 +358,9 @@ main(int argc, char **argv)
   crypto_global_init(1, NULL, NULL);
   crypto_seed_rng(1);
 
+#ifndef USE_MTCP
   rq = replyqueue_new(as_flags);
+#endif
   tor_assert(rq);
   tp = threadpool_new(opt_n_threads,
                       rq, new_state, free_state, NULL);

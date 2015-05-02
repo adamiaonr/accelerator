@@ -736,7 +736,17 @@ control_setconf_helper(control_connection_t *conn, uint32_t len, char *body,
   }
   tor_free(config);
 
-  opt_err = options_trial_assign(lines, use_defaults, clear_first, &errstring);
+#ifdef USE_MTCP
+	opt_err = options_trial_assign(
+			conn->base_.mtcp_thread_ctx,
+			lines,
+			use_defaults,
+			clear_first,
+			&errstring);
+#else
+	opt_err = options_trial_assign(lines, use_defaults, clear_first, &errstring);
+#endif
+
   {
     const char *msg;
     switch (opt_err) {
@@ -866,7 +876,20 @@ handle_control_loadconf(control_connection_t *conn, uint32_t len,
   const char *msg = NULL;
   (void) len;
 
-  retval = options_init_from_string(NULL, body, CMD_RUN_TOR, NULL, &errstring);
+#ifdef USE_MTCP
+
+	retval = options_init_from_string(
+			conn->base_.mtcp_thread_ctx,
+			NULL,
+			body,
+			CMD_RUN_TOR,
+			NULL,
+			&errstring);
+
+#else
+	retval = options_init_from_string(NULL, body, CMD_RUN_TOR, NULL, &errstring);
+#endif
+
 
   if (retval != SETOPT_OK)
     log_warn(LD_CONTROL,

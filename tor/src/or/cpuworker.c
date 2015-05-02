@@ -71,6 +71,39 @@ replyqueue_process_cb(evutil_socket_t sock, short events, void *arg)
   replyqueue_process(rq);
 }
 
+#ifdef USE_MTCP
+
+/** Initialize the cpuworker subsystem. It is OK to call this more than once
+ * during Tor's lifetime.
+ */
+void
+cpu_init(struct thread_context * mtcp_thread_ctx)
+{
+  if (!replyqueue) {
+    replyqueue = replyqueue_new(mtcp_thread_ctx, 0);
+  }
+  if (!reply_event) {
+    reply_event = tor_event_new(tor_libevent_get_base(),
+                                replyqueue_get_socket(replyqueue),
+                                EV_READ|EV_PERSIST,
+                                replyqueue_process_cb,
+                                replyqueue);
+    event_add(reply_event, NULL);
+  }
+  if (!threadpool) {
+    threadpool = threadpool_new(get_num_cpus(get_options()),
+                                replyqueue,
+                                worker_state_new,
+                                worker_state_free,
+                                NULL);
+  }
+  /* Total voodoo. Can we make this more sensible? */
+  max_pending_tasks = get_num_cpus(get_options()) * 64;
+  crypto_seed_weak_rng(&request_sample_rng);
+}
+
+#else
+
 /** Initialize the cpuworker subsystem. It is OK to call this more than once
  * during Tor's lifetime.
  */
@@ -99,6 +132,8 @@ cpu_init(void)
   max_pending_tasks = get_num_cpus(get_options()) * 64;
   crypto_seed_weak_rng(&request_sample_rng);
 }
+
+#endif
 
 /** Magic numbers to make sure our cpuworker_requests don't grow any
  * mis-framing bugs. */

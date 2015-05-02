@@ -447,63 +447,48 @@ typedef int socklen_t;
 #endif
 
 #ifdef USE_MTCP
-
-// XXX: mTCP changes: not sure about what these are for...
-#define MAX_FLOW_NUM  (10000)
-#define MAX_EVENTS (MAX_FLOW_NUM * 3)
-
-struct thread_context
-{
-	mctx_t mctx;
-	int ep;
-	//struct server_vars *svars;
-};
-
+#include "tor_mtcp.h"
 #endif
 
 // XXX: mTCP changes: 'wrapper' methods change
 #ifdef USE_MTCP
 
-int tor_close_socket_simple(
+int tor_close_mtcp_socket(
 		struct thread_context * mtcp_thread_ctx,
 		tor_socket_t s);
 
-int tor_close_socket(
-		struct thread_context * mtcp_thread_ctx,
-		tor_socket_t s);
-
-tor_socket_t tor_open_socket_with_extensions(
+tor_socket_t tor_open_mtcp_socket_with_extensions(
 		struct thread_context * mtcp_thread_ctx,
 		int domain, int type, int protocol,
 		int cloexec, int nonblock);
 
-tor_socket_t tor_open_socket(
+tor_socket_t tor_open_mtcp_socket(
 		struct thread_context * mtcp_thread_ctx,
 		int domain, int type, int protocol);
 
-tor_socket_t tor_open_socket_nonblocking(
+tor_socket_t tor_open_mtcp_socket_nonblocking(
 		struct thread_context * mtcp_thread_ctx,
 		int domain, int type, int protocol);
 
-tor_socket_t tor_accept_socket(
+tor_socket_t tor_accept_mtcp_socket(
 		struct thread_context * mtcp_thread_ctx,
 		tor_socket_t sockfd, struct sockaddr *addr,
 		socklen_t *len);
 
-tor_socket_t tor_accept_socket_nonblocking(
+tor_socket_t tor_accept_mtcp_socket_nonblocking(
 		struct thread_context * mtcp_thread_ctx,
 		tor_socket_t sockfd,
 		struct sockaddr *addr,
 		socklen_t *len);
 
-tor_socket_t tor_accept_socket_with_extensions(
+tor_socket_t tor_accept_mtcp_socket_with_extensions(
 		struct thread_context * mtcp_thread_ctx,
 		tor_socket_t sockfd,
 		struct sockaddr *addr,
 		socklen_t *len,
 		int cloexec, int nonblock);
 
-#else
+#endif	// XXX: mTCP
 
 int tor_close_socket_simple(tor_socket_t s);
 int tor_close_socket(tor_socket_t s);
@@ -521,8 +506,6 @@ tor_socket_t tor_accept_socket_with_extensions(tor_socket_t sockfd,
                                                struct sockaddr *addr,
                                                socklen_t *len,
                                                int cloexec, int nonblock);
-
-#endif
 
 int get_n_open_sockets(void);
 

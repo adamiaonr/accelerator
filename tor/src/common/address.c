@@ -1519,7 +1519,7 @@ get_interface_address6,(int severity, sa_family_t family, tor_addr_t *addr))
 // be connecting to the Internet)
 #ifdef USE_MTCP
   goto err;
-#endif
+#else
 
   struct sockaddr_storage my_addr, target_addr;
   socklen_t addr_len;
@@ -1595,10 +1595,18 @@ get_interface_address6,(int severity, sa_family_t family, tor_addr_t *addr))
 
   tor_addr_from_sockaddr(addr, (struct sockaddr*)&my_addr, NULL);
   r=0;
- err:
-  if (sock >= 0)
-    tor_close_socket(sock);
-  return r;
+
+#endif	// XXX: mTCP
+
+  err:
+
+#ifdef USE_MTCP
+	return -1;
+#else
+	if (sock >= 0)
+		tor_close_socket(sock);
+	return r;
+#endif
 }
 
 /* ======

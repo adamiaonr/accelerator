@@ -14,10 +14,23 @@
 
 #include "testsupport.h"
 
+#ifdef USE_MTCP
+#include "tor_mtcp.h"
+#endif
+
 const char *get_dirportfrontpage(void);
 MOCK_DECL(const or_options_t *,get_options,(void));
 or_options_t *get_options_mutable(void);
-int set_options(or_options_t *new_val, char **msg);
+
+#ifdef USE_MTCP
+int set_options(
+		struct thread_context * mtcp_thread_ctx,
+		or_options_t *new_val, char **msg);
+#else
+int set_options(
+		or_options_t *new_val, char **msg);
+#endif
+
 void config_free_all(void);
 const char *safe_str_client(const char *address);
 const char *safe_str(const char *address);
@@ -25,8 +38,17 @@ const char *escaped_safe_str_client(const char *address);
 const char *escaped_safe_str(const char *address);
 const char *get_version(void);
 const char *get_short_version(void);
-setopt_err_t options_trial_assign(config_line_t *list, int use_defaults,
-                                  int clear_first, char **msg);
+
+#ifdef USE_MTCP
+setopt_err_t options_trial_assign(
+						struct thread_context * mtcp_thread_ctx,
+						config_line_t *list, int use_defaults,
+						int clear_first, char **msg);
+#else
+setopt_err_t
+options_trial_assign(config_line_t *list, int use_defaults,
+                     int clear_first, char **msg);
+#endif
 
 uint32_t get_last_resolved_addr(void);
 void reset_last_resolved_addr(void);
@@ -40,9 +62,29 @@ void options_init(or_options_t *options);
 #define OPTIONS_DUMP_DEFAULTS 2
 #define OPTIONS_DUMP_ALL 3
 char *options_dump(const or_options_t *options, int how_to_dump);
+
+#ifdef USE_MTCP
+int options_init_from_torrc(
+		struct thread_context * mtcp_thread_ctx,
+		int argc,
+		char **argv);
+#else
 int options_init_from_torrc(int argc, char **argv);
-setopt_err_t options_init_from_string(const char *cf_defaults, const char *cf,
-                            int command, const char *command_arg, char **msg);
+#endif
+
+#ifdef USE_MTCP
+setopt_err_t options_init_from_string(
+							struct thread_context * mtcp_thread_ctx,
+							const char *cf_defaults, const char *cf,
+							int command, const char *command_arg,
+							char **msg);
+#else
+setopt_err_t
+options_init_from_string(const char *cf_defaults, const char *cf,
+                         int command, const char *command_arg,
+                         char **msg);
+#endif
+
 int option_is_recognized(const char *key);
 const char *option_get_canonical_name(const char *key);
 config_line_t *option_get_assignment(const or_options_t *options,

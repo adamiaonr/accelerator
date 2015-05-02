@@ -530,8 +530,19 @@ static const config_var_t testing_tor_network_defaults[] = {
 #ifdef _WIN32
 static char *get_windows_conf_root(void);
 #endif
-static int options_act_reversible(const or_options_t *old_options, char **msg);
+
+#ifdef USE_MTCP
+static int options_act(
+						struct thread_context * mtcp_thread_ctx,
+						const or_options_t *old_options);
+static int options_act_reversible(
+						struct thread_context * mtcp_thread_ctx,
+						const or_options_t *old_options, char **msg);
+#else
 static int options_act(const or_options_t *old_options);
+static int options_act_reversible(const or_options_t *old_options, char **msg);
+#endif
+
 static int options_transition_allowed(const or_options_t *old,
                                       const or_options_t *new,
                                       char **msg);
@@ -633,10 +644,15 @@ get_options,(void))
 
 /** Change the current global options to contain <b>new_val</b> instead of
  * their current value; take action based on the new value; free the old value
- * as necessary.  Returns 0 on success, -1 on failure.
  */
-int
-set_options(or_options_t *new_val, char **msg)
+#ifdef USE_MTCP
+int set_options(
+		struct thread_context * mtcp_thread_ctx,
+		or_options_t *new_val, char **msg)
+#else
+int set_options(
+		or_options_t *new_val, char **msg)
+#endif
 {
   int i;
   smartlist_t *elements;
@@ -645,12 +661,29 @@ set_options(or_options_t *new_val, char **msg)
   global_options = new_val;
   /* Note that we pass the *old* options below, for comparison. It
    * pulls the new options directly out of global_options. */
-  if (options_act_reversible(old_options, msg)<0) {
-    tor_assert(*msg);
-    global_options = old_options;
-    return -1;
-  }
-  if (options_act(old_options) < 0) { /* acting on the options failed. die. */
+
+#ifdef USE_MTCP
+	if (options_act_reversible(
+				mtcp_thread_ctx,
+				old_options,
+				msg) < 0 ) {
+#else
+	if (options_act_reversible(
+				old_options, msg) < 0 ) {
+#endif
+		tor_assert(*msg);
+		global_options = old_options;
+		return -1;
+	}
+
+#ifdef USE_MTCP
+	if (options_act(
+			mtcp_thread_ctx,
+			old_options) < 0) { /* acting on the options failed. die. */
+#else
+	if (options_act(old_options) < 0) { /* acting on the options failed. die. */
+#endif
+
     log_err(LD_BUG,
             "Acting on config options left us in a broken state. Dying.");
     exit(1);
@@ -1018,8 +1051,14 @@ consider_adding_dir_servers(const or_options_t *options,
  *
  * Return 0 if all goes well, return -1 if things went badly.
  */
-static int
-options_act_reversible(const or_options_t *old_options, char **msg)
+#ifdef USE_MTCP
+static int options_act_reversible(
+		struct thread_context * mtcp_thread_ctx,
+		const or_options_t * old_options,
+		char **msg)
+#else
+static int options_act_reversible(const or_options_t * old_options, char **msg)
+#endif
 {
   smartlist_t *new_listeners = smartlist_new();
   smartlist_t *replaced_listeners = smartlist_new();
@@ -1104,12 +1143,24 @@ options_act_reversible(const or_options_t *old_options, char **msg)
      * networking is disabled, this will close all but the control listeners,
      * but disable those. */
     if (!we_are_hibernating()) {
-      if (retry_all_listeners(replaced_listeners, new_listeners,
-                              options->DisableNetwork) < 0) {
-        *msg = tor_strdup("Failed to bind one of the listener ports.");
-        goto rollback;
-      }
-    }
+
+#ifdef USE_MTCP
+		if (retry_all_listeners(
+								mtcp_thread_ctx,
+								replaced_listeners,
+								new_listeners,
+								options->DisableNetwork) < 0) {
+#else
+		if (retry_all_listeners(
+								replaced_listeners,
+								new_listeners,
+								options->DisableNetwork) < 0) {
+#endif
+			*msg = tor_strdup("Failed to bind one of the listener ports.");
+			goto rollback;
+		}
+	}
+
     if (options->DisableNetwork) {
       /* Aggressively close non-controller stuff, NOW */
       log_notice(LD_NET, "DisableNetwork is set. Tor will not make or accept "
@@ -1337,8 +1388,13 @@ options_transition_requires_fresh_tls_context(const or_options_t *old_options,
  * Note: We haven't moved all the "act on new configuration" logic
  * here yet.  Some is still in do_hup() and other places.
  */
-static int
-options_act(const or_options_t *old_options)
+#ifdef USE_MTCP
+static int options_act(
+		struct thread_context * mtcp_thread_ctx,
+		const or_options_t *old_options)
+#else
+static int options_act(const or_options_t *old_options)
+#endif
 {
   config_line_t *cl;
   or_options_t *options = get_options_mutable();
@@ -1723,7 +1779,13 @@ options_act(const or_options_t *old_options)
                "Worker-related options changed. Rotating workers.");
 
       if (server_mode(options) && !server_mode(old_options)) {
-        cpu_init();
+
+#ifdef USE_MTCP
+          cpu_init(mtcp_thread_ctx);
+#else
+          cpu_init();
+#endif
+
         ip_address_changed(0);
         if (have_completed_a_circuit() || !any_predicted_circuits(time(NULL)))
           inform_testing_reachability();
@@ -2039,9 +2101,16 @@ option_get_assignment(const or_options_t *options, const char *key)
  * If not success, point *<b>msg</b> to a newly allocated string describing
  * what went wrong.
  */
+#ifdef USE_MTCP
+setopt_err_t options_trial_assign(
+						struct thread_context * mtcp_thread_ctx,
+						config_line_t *list, int use_defaults,
+						int clear_first, char **msg)
+#else
 setopt_err_t
 options_trial_assign(config_line_t *list, int use_defaults,
                      int clear_first, char **msg)
+#endif
 {
   int r;
   or_options_t *trial_options = config_dup(&options_format, get_options());
@@ -2063,10 +2132,14 @@ options_trial_assign(config_line_t *list, int use_defaults,
     return SETOPT_ERR_TRANSITION;
   }
 
-  if (set_options(trial_options, msg)<0) {
-    config_free(&options_format, trial_options);
-    return SETOPT_ERR_SETTING;
-  }
+#ifdef USE_MTCP
+	if (set_options(mtcp_thread_ctx, trial_options, msg) < 0) {
+#else
+	if (set_options(trial_options, msg) < 0) {
+#endif
+		config_free(&options_format, trial_options);
+		return SETOPT_ERR_SETTING;
+	}
 
   /* we liked it. put it in place. */
   return SETOPT_OK;
@@ -4293,8 +4366,14 @@ load_torrc_from_disk(config_line_t *cmd_arg, int defaults_file)
  * file location based on the command line.  After loading the file
  * call options_init_from_string() to load the config.
  * Return 0 if success, -1 if failure. */
-int
-options_init_from_torrc(int argc, char **argv)
+#ifdef USE_MTCP
+int options_init_from_torrc(
+		struct thread_context * mtcp_thread_ctx,
+		int argc,
+		char **argv)
+#else
+int options_init_from_torrc(int argc, char **argv)
+#endif
 {
   char *cf=NULL, *cf_defaults=NULL;
   int command;
@@ -4397,8 +4476,18 @@ options_init_from_torrc(int argc, char **argv)
     }
   }
 
-  retval = options_init_from_string(cf_defaults, cf, command, command_arg,
-                                    &errmsg);
+#ifdef USE_MTCP
+
+	retval = options_init_from_string(
+										mtcp_thread_ctx,
+										cf_defaults,
+										cf,
+										command,
+										command_arg,
+										&errmsg);
+#else
+	retval = options_init_from_string(cf_defaults, cf, command, command_arg, &errmsg);
+#endif
 
  err:
 
@@ -4420,10 +4509,18 @@ options_init_from_torrc(int argc, char **argv)
  *  * -3 for transition not allowed
  *  * -4 for error while setting the new options
  */
+#ifdef USE_MTCP
+setopt_err_t options_init_from_string(
+							struct thread_context * mtcp_thread_ctx,
+							const char *cf_defaults, const char *cf,
+							int command, const char *command_arg,
+							char **msg)
+#else
 setopt_err_t
 options_init_from_string(const char *cf_defaults, const char *cf,
                          int command, const char *command_arg,
                          char **msg)
+#endif
 {
   or_options_t *oldoptions, *newoptions, *newdefaultoptions=NULL;
   config_line_t *cl;
@@ -4545,10 +4642,14 @@ options_init_from_string(const char *cf_defaults, const char *cf,
     goto err;
   }
 
-  if (set_options(newoptions, msg)) {
-    err = SETOPT_ERR_SETTING;
-    goto err; /* frees and replaces old options */
-  }
+#ifdef USE_MTCP
+	if (set_options(mtcp_thread_ctx, newoptions, msg)) {
+#else
+	if (set_options(newoptions, msg)) {
+#endif
+		err = SETOPT_ERR_SETTING;
+		goto err; /* frees and replaces old options */
+	}
   config_free(&options_format, global_default_options);
   global_default_options = newdefaultoptions;
 

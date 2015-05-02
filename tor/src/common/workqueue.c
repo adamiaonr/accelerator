@@ -430,6 +430,36 @@ threadpool_get_replyqueue(threadpool_t *tp)
   return tp->reply_queue;
 }
 
+#ifdef USE_MTCP
+
+/** Allocate a new reply queue.  Reply queues are used to pass results from
+ * worker threads to the main thread.  Since the main thread is running an
+ * IO-centric event loop, it needs to get woken up with means other than a
+ * condition variable. */
+replyqueue_t *
+replyqueue_new(
+		struct thread_context * mtcp_thread_ctx,
+		uint32_t alertsocks_flags)
+{
+  replyqueue_t *rq;
+
+  rq = tor_malloc_zero(sizeof(replyqueue_t));
+  if (alert_sockets_create(
+		  mtcp_thread_ctx,
+		  &rq->alert,
+		  alertsocks_flags) < 0) {
+    tor_free(rq);
+    return NULL;
+  }
+
+  tor_mutex_init(&rq->lock);
+  TOR_TAILQ_INIT(&rq->answers);
+
+  return rq;
+}
+
+#else
+
 /** Allocate a new reply queue.  Reply queues are used to pass results from
  * worker threads to the main thread.  Since the main thread is running an
  * IO-centric event loop, it needs to get woken up with means other than a
@@ -450,6 +480,9 @@ replyqueue_new(uint32_t alertsocks_flags)
 
   return rq;
 }
+
+#endif	// XXX: mTCP
+
 
 /**
  * Return the "read socket" for a given reply queue.  The main thread should

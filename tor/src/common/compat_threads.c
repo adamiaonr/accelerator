@@ -296,7 +296,7 @@ alert_sockets_create(alert_sockets_t *socks_out, uint32_t flags)
  * pointers, in <b>socks_out</b>. */
 int
 alert_sockets_create(
-		thread_context * mtcp_thread_ctx,
+		struct thread_context * mtcp_thread_ctx,
 		alert_sockets_t * socks_out,
 		uint32_t flags)
 {
@@ -306,12 +306,12 @@ alert_sockets_create(
 	/* Now try the regular pipe() syscall.  Pipes have a bit lower overhead than
 	 * socketpairs, fwict. */
 	if (!(flags & ASOCKS_NOPIPE) &&
-			mtcp_pipe(mtcp_thread_ctx, socks) == 0) {
+			mtcp_pipe(mtcp_thread_ctx->mctx, socks) == 0) {
 
 		if (fcntl(socks[0], F_SETFD, FD_CLOEXEC) < 0 ||
 				fcntl(socks[1], F_SETFD, FD_CLOEXEC) < 0 ||
-				mtcp_setsock_nonblock(mtcp_thread_ctx, socks[0]) < 0 ||
-				mtcp_setsock_nonblock(mtcp_thread_ctx, socks[0]) < 1) {
+				mtcp_setsock_nonblock(mtcp_thread_ctx->mctx, socks[0]) < 0 ||
+				mtcp_setsock_nonblock(mtcp_thread_ctx->mctx, socks[0]) < 1) {
 
 			mtcp_close(mtcp_thread_ctx->mctx, socks[0]);
 			mtcp_close(mtcp_thread_ctx->mctx, socks[1]);
@@ -332,10 +332,10 @@ alert_sockets_create(
 	if (!(flags & ASOCKS_NOSOCKETPAIR) &&
 			tor_socketpair(AF_UNIX, SOCK_STREAM, 0, socks) == 0) {
 
-		if (mtcp_setsock_nonblock(mtcp_thread_ctx, socks[0]) < 0 ||
-				mtcp_setsock_nonblock(mtcp_thread_ctx, socks[1])) {
-				tor_close_socket(mtcp_thread_ctx, socks[0]);
-				tor_close_socket(mtcp_thread_ctx, socks[1]);
+		if (mtcp_setsock_nonblock(mtcp_thread_ctx->mctx, socks[0]) < 0 ||
+				mtcp_setsock_nonblock(mtcp_thread_ctx->mctx, socks[1])) {
+				tor_close_mtcp_socket(mtcp_thread_ctx, socks[0]);
+				tor_close_mtcp_socket(mtcp_thread_ctx, socks[1]);
 
 				return -1;
 		}
@@ -356,14 +356,14 @@ alert_sockets_create(
 #ifdef USE_MTCP
 /** Close the sockets in <b>socks</b>. */
 void alert_sockets_close(
-		thread_context * mtcp_thread_ctx,
+		struct thread_context * mtcp_thread_ctx,
 		alert_sockets_t *socks)
 {
 	if (socks->alert_fn == sock_alert) {
 
 		/* they are sockets. */
-		tor_close_socket(mtcp_thread_ctx, socks->read_fd);
-		tor_close_socket(mtcp_thread_ctx, socks->write_fd);
+		tor_close_mtcp_socket(mtcp_thread_ctx, socks->read_fd);
+		tor_close_mtcp_socket(mtcp_thread_ctx, socks->write_fd);
 
 	} else {
 

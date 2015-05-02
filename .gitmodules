@@ -7,3 +7,6 @@
 [submodule "lib/openssl"]
 	path = lib/openssl
 	url = https://github.com/openssl/openssl.git
+[submodule "lib/uthash"]
+	path = lib/uthash
+	url = https://github.com/troydhanson/uthash.git

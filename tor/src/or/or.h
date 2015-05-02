@@ -94,6 +94,12 @@
 //#include <mtcp_epoll.h>
 #include "tor_mtcp.h"
 
+// XXX: mTCP changes: using uthash (http://troydhanson.github.io/uthash/) to
+// make the connection_t struct hashable. this is necessary so that i can
+// identify connection_t objects by their socket fds and handle read and
+// write events on main.c.
+#include "../../../lib/uthash/src/uthash.h"
+
 #endif
 
 #include "crypto.h"
@@ -1289,6 +1295,8 @@ typedef struct connection_t {
 	struct mtcp_epoll_event * write_event;
 
 	struct thread_context * mtcp_thread_ctx;
+
+	UT_hash_handle hh; /* makes this structure hashable */
 
 #else
   struct event *read_event; /**< Libevent event structure. */

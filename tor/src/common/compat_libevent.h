@@ -27,6 +27,8 @@ void suppress_libevent_log_msg(const char *msg);
 
 #ifdef USE_MTCP
 
+#include "tor_mtcp.h"
+
 struct mtcp_epoll_event * tor_mtcp_event_new(
 		mctx_t mctx,
 		int mtcp_event_pool_id,

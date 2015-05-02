@@ -12,7 +12,17 @@
 #ifndef TOR_CPUWORKER_H
 #define TOR_CPUWORKER_H
 
+#ifdef USE_MTCP
+#include "tor_mtcp.h"
+
+void cpu_init(struct thread_context * mtcp_thread_ctx);
+
+#else
+
 void cpu_init(void);
+
+#endif	// XXX: mTCP
+
 void cpuworkers_rotate_keyinfo(void);
 
 struct create_cell_t;

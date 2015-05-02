@@ -43,7 +43,9 @@
 #include "buffers.h"
 
 // XXX: mTCP changes: mTCP includes
+#ifdef USE_MTCP
 #include "tor_mtcp.h"
+#endif
 
 const char *conn_type_to_string(int type);
 const char *conn_state_to_string(int type, int state);
@@ -141,9 +143,16 @@ void log_failed_proxy_connection(connection_t *conn);
 int get_proxy_addrport(tor_addr_t *addr, uint16_t *port, int *proxy_type,
                        const connection_t *conn);
 
-int retry_all_listeners(smartlist_t *replaced_conns,
-                        smartlist_t *new_conns,
-                        int close_all_noncontrol);
+#ifdef USE_MTCP
+int retry_all_listeners(
+					struct thread_context * mtcp_thread_ctx,
+					smartlist_t *replaced_conns,
+                    smartlist_t *new_conns, int close_all_noncontrol);
+#else
+int
+retry_all_listeners(smartlist_t *replaced_conns,
+                    smartlist_t *new_conns, int close_all_noncontrol);
+#endif
 
 void connection_mark_all_noncontrol_listeners(void);
 void connection_mark_all_noncontrol_connections(void);
