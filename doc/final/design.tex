@@ -8,7 +8,7 @@ explain relevant implementation issues.
 \label{subsec:design-overview}
 
 acceleraTor's overall design is depicted in Figure~\ref{fig:accelerator-design}: we 
-compare it with the design of `vanilla' Tor to clearly emphasize their differences.
+compare it to the design of `vanilla' Tor to clearly emphasize their differences.
 
 \begin{figure}[h!]
 
@@ -19,20 +19,19 @@ compare it with the design of `vanilla' Tor to clearly emphasize their differenc
 
 \end{figure}
 
-At the extremes (top and bottom) we have acceleraTor as a TCP-based network 
-application which implements Tor OR application logic and the 
-pre-defined user-level packet input\slash output 
-(I\slash O) library, DPDK v1.8, which reads\slash writes packets directly 
-from DPDK-compatible Network Interface Cards (NICs), at user-level. 
+At the extremes of Figure~\ref{fig:accelerator-design} b) we have acceleraTor (top), a TCP-based network 
+application which implements Tor OR logic; and DPDK's user-level packet input\slash output 
+(I\slash O) libraries (bottom), which read\slash write packets directly 
+from DPDK-compatible Network Interface Cards (NICs). 
 The main difference with respect to `vanilla' Tor is that all levels in 
 acceleraTor's design run in user space. In-between, we recur to a user-level 
-TCP stack -- mTCP~\cite{179773} -- to neatly interconnect acceleraTor and DPDK, 
+TCP stack -- mTCP~\cite{179773} -- to interconnect acceleraTor and DPDK, 
 and ultimately reserve the `services' of 
 a single DPDK-compatible NIC to the application. Although not 
-part of acceleraTor's design per se, due to this 
-application-NIC `exclusivity', we run acceleraTor in nodes equipped with 
+part of acceleraTor's design per se, this 
+application-NIC `exclusivity' led us to run acceleraTor in nodes equipped with 
 two NICs, one to be handled by a DPDK-compatible driver and reserved for 
-acceleraTor, another handled by a kernel driver, which allows for the parallel operation of `usual' 
+acceleraTor, another handled by a Linux kernel driver, which allows for the parallel operation of `usual' 
 networking applications.
 
 In the next subsections, we discuss design and implementation aspects for each 
@@ -55,9 +54,9 @@ involves challenges. Without kernel-level support of TCP, we either:
 \end{enumerate}
 
 Option 1 would heavily modify the way Tor 
-works -- e.g. Tor makes heavy use of TLS, which depends on TCP's reliable transport -- not 
-only making acceleraTor ORs incompatible with `vanilla' Tor nodes, 
-but also making acceleraTor's modifications to Tor unnecessarily intrusive and harder. Option 2 is 
+works -- e.g. Tor makes use of TLS, which depends on TCP's reliable transport -- not 
+only making acceleraTor ORs incompatible with `vanilla' Tor ORs, 
+but also making modifications to Tor unnecessarily intrusive and harder. Option 2 is 
 more desirable: ideally, it should rely on an intermediate module which (1) interfaces with 
 DPDK to read\slash write `raw' packets from\slash to NICs, (2) implements ``enough of'' TCP to 
 have TCP-based applications and TLS work on top of it; and (3) exposes a 
