@@ -20,8 +20,8 @@ compare it to the design of `vanilla' Tor to clearly emphasize their differences
 \end{figure}
 
 At the extremes of Figure~\ref{fig:accelerator-design} b) we have acceleraTor (top), a TCP-based network 
-application which implements Tor OR logic; and DPDK's user-level packet input\slash output 
-(I\slash O) libraries (bottom), which read\slash write packets directly 
+application which implements Tor OR logic; and DPDK's user-level packet I\slash O 
+libraries (bottom), which read\slash write packets directly 
 from DPDK-compatible Network Interface Cards (NICs). 
 The main difference with respect to `vanilla' Tor is that all levels in 
 acceleraTor's design run in user space. In-between, we recur to a user-level 
