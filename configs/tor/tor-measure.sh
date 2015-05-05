@@ -66,10 +66,10 @@ rm -rf *.pcap
 # 1) start NUM_RUNS measurements on each one of the tor nodes
 while [[ $NUM_RUNS -gt 0 ]]; do
 
-	INDEX=0
+	INDEX=3
 
 	# 2) start tcpdump, tor (and privoxy on node 1)
-	for IP in ${NODE_IPS[@]}; do
+	while [[ $INDEX -ge 0 ]]; do
 
 		# 2.1) keep a separate folder for each one of the tor nodes
 		if [[ ! -d $TEST_FOLDER/${NODE_NAMES[$INDEX]} ]]; then
@@ -78,25 +78,34 @@ while [[ $NUM_RUNS -gt 0 ]]; do
 
 		cd $TEST_FOLDER/${NODE_NAMES[$INDEX]}
 
-		# 2.2) remote start (1) tcpdump and (2) tor, in that 
+		ssh -i $PEM_FILE -t $USER@${NODE_IPS[$INDEX]} bash -c "'sudo killall tcpdump'"
+
+		# # 2.2) if node 1, stop privoxy (proxy for tor + wget)
+		# if [[ $INDEX -eq 0 ]]; then
+		# 	ssh -i $PEM_FILE -t $USER@${NODE_IPS[$INDEX]} bash -c "'sudo service privoxy stop'"
+		# fi
+
+		# 2.3) remote start (1) tcpdump and (2) tor, in that 
 		# order. the tcpdump files are saved as [node_num].[num_run].pcap
-		ssh -i $PEM_FILE $USER@$IP bash -c "'(sudo nohup tcpdump -i eth0 -w $TOR_DATA_DIR/${NODE_NAMES[$INDEX]}.$NUM_RUNS.pcap >/dev/null 2>&1) &'"
-		ssh -i $PEM_FILE $USER@$IP bash -c "'$TOR_DIR/$TOR_OR_DIR/$TOR_BINARY -f $TOR_DATA_DIR/$TOR_TORRC'"
+		ssh -i $PEM_FILE $USER@${NODE_IPS[$INDEX]} bash -c "'(sudo nohup tcpdump -i eth0 -w $TOR_DATA_DIR/${NODE_NAMES[$INDEX]}.$NUM_RUNS.pcap >/dev/null 2>&1) &'"
+#		ssh -i $PEM_FILE $USER@${NODE_IPS[$INDEX]} bash -c "'$TOR_DIR/$TOR_OR_DIR/$TOR_BINARY -f $TOR_DATA_DIR/$TOR_TORRC'"
 
-		# 2.3) in node 1, stop and start privoxy AFTER tor is 
-		# initialized
-		if [[ $INDEX -eq 0 ]]; then
-			ssh -i $PEM_FILE -t $USER@$IP bash -c "'sudo service privoxy stop; sudo service privoxy start;'"
-		fi
+		# # 2.4) in node 1, start privoxy AFTER tor is initialized
+		# if [[ $INDEX -eq 0 ]]; then
 
-		$((INDEX++))
+		# 	# 2.4.1) x second rule...
+		# 	sleep 1
+		# 	ssh -i $PEM_FILE -t $USER@${NODE_IPS[$INDEX]} bash -c "'sudo service privoxy start'"
+		# fi
+
+		$((INDEX--))
 
 	done
 
 	# 3) start a file transaction at a precise rate given as argument...
 	# ... and remove the file, as we don't need it (ALWAYS CLEAN UP 
 	# AFTER YOURSELF!!!)
-	ssh -i $PEM_FILE $USER@$NODE_SRVR bash -c "'wget --limit-rate $LIMIT_RATE http://$NODE_SRVR/$FILE; rm $FILE'"
+	ssh -i $PEM_FILE $USER@${NODE_IPS[0]} bash -c "'wget --tries=3 --timeout=3 --limit-rate=$LIMIT_RATE http://$NODE_SRVR/$FILE; rm $FILE'"
 
 	INDEX=0
 
@@ -105,13 +114,13 @@ while [[ $NUM_RUNS -gt 0 ]]; do
 
 		# 4.1) killall (1) tcpdump and (2) tor, in that order
 		ssh -i $PEM_FILE $USER@$IP bash -c "'sudo killall tcpdump'"
-		ssh -i $PEM_FILE $USER@$IP bash -c "'killall tor'"
+#		ssh -i $PEM_FILE $USER@$IP bash -c "'killall tor'"
 
 		# 4.2) scp the files into node-gw
 		cd $TEST_FOLDER/${NODE_NAMES[$INDEX]}
 		scp -i $PEM_FILE $USER@$IP:$TOR_DATA_DIR/${NODE_NAMES[$INDEX]}.$NUM_RUNS.pcap .
 
-		stuff on the remote side...
+		# 4.3) clean up stuff on remote side
 		ssh -i $PEM_FILE $USER@$IP bash -c "'cd $TOR_DATA_DIR; rm *.pcap;'"
 
 		$((INDEX++))
@@ -123,6 +132,6 @@ while [[ $NUM_RUNS -gt 0 ]]; do
 done
 
 # 5) finally, stop all ec2 instances
-$TOR_CONFIGS/tor-setup.sh --stop-instances
+#$TOR_CONFIGS/tor-setup.sh --stop-instances
 
 exit 0
