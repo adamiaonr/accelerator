@@ -141,22 +141,38 @@ for FILE in *.pcap; do
 	LAST_OUT=""
 	PACKETS_OUT=0
 
-	tshark -tud -r $FILE -Y "tcp.stream eq $TCP_STREAM_INDEX_SRC and ip.dst == ${NODE_IPS[$THIS_NODE]} ip.dst == ${NODE_IPS[$THIS_NODE]} and frame.len > 1000 and (ip.src != 172.31.100.22 and ip.dst != 172.31.100.22)" -T fields -e frame.time > temp.csv
-	FIRST_IN=$(head -1 temp.csv)
-	LAST_IN=$(tail -1 temp.csv)
-	PACKETS_IN=$(cat temp.csv | wc -l)
+	tshark -tud -r $FILE -Y "tcp.stream eq $TCP_STREAM_INDEX_SRC and ip.dst == ${NODE_IPS[$THIS_NODE]} and frame.len > 1000 and (ip.src != 172.31.100.22 and ip.dst != 172.31.100.22)" -T fields -e frame.time > temp.in.csv
+	#FIRST_IN=$(head -1 temp.csv)
+	#LAST_IN=$(tail -1 temp.csv)
+	PACKETS_IN=$(cat temp.in.csv | wc -l)
 
-	tshark -tud -r $FILE -Y "tcp.stream eq $TCP_STREAM_INDEX_DST and ip.src == ${NODE_IPS[$THIS_NODE]} and frame.number > $SRC_FRAME_NUM and frame.len > 1000 and (ip.src != 172.31.100.22 and ip.dst != 172.31.100.22)" -T fields -e frame.time > temp.csv
-	FIRST_OUT=$(head -1 temp.csv)
-	LAST_OUT=$(tail -1 temp.csv)
-	PACKETS_OUT=$(cat temp.csv | wc -l)
+	tshark -tud -r $FILE -Y "tcp.stream eq $TCP_STREAM_INDEX_DST and ip.src == ${NODE_IPS[$THIS_NODE]} and frame.number > $SRC_FRAME_NUM and frame.len > 1000 and (ip.src != 172.31.100.22 and ip.dst != 172.31.100.22)" -T fields -e frame.time > temp.out.csv
+	# FIRST_OUT=$(head -1 temp.csv)
+	# LAST_OUT=$(tail -1 temp.csv)
+	PACKETS_OUT=$(cat temp.out.csv | wc -l)
 
 	# 4) write to the final .csv file
 	echo -e "# test "$TEST_NUMBER >> $NODE_FILE
-	echo -e $SRC_IP"\t"$DST_IP >> $NODE_FILE
-	echo -e $FIRST_IN"\t"$LAST_IN >> $NODE_FILE
-	echo -e $FIRST_OUT"\t"$LAST_OUT >> $NODE_FILE
-	echo -e $PACKETS_IN"\t"$PACKETS_OUT >> $NODE_FILE
+	echo -e $SRC_IP",\t"$DST_IP >> $NODE_FILE
+	echo -e $PACKETS_IN",\t"$PACKETS_OUT >> $NODE_FILE
+
+	# 4.1) print in and out packets, side by side...
+	NUM_LINES=$( (( $PACKETS_IN <= $PACKETS_OUT )) && echo "$PACKETS_IN" || echo "$PACKETS_OUT" )
+	LINE=1
+
+	while [[ $LINE -le $NUM_LINES ]]; do
+
+		IN=$(sed -e "$LINE","$LINE"!d temp.in.csv)
+		OUT=$(sed -e "$LINE","$LINE"!d temp.out.csv)
+
+		echo -e $IN",\t"$OUT >> $NODE_FILE
+
+		$((LINE++))
+	done
+
+	# echo -e $FIRST_IN",\t"$LAST_IN >> $NODE_FILE
+	# echo -e $FIRST_OUT",\t"$LAST_OUT >> $NODE_FILE
+	
 	echo -e "" >> $NODE_FILE
 
 	$((TEST_NUMBER++))
