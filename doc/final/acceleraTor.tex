@@ -87,24 +87,21 @@
 %\input{abstract}
 %% ABSTRACT
 \begin{abstract}
-The abstract goes here.
+In this work, we integrate the popular anonymous network Tor with Intel's fast packet processing framework DPDK and aim to identify the gains in Tor's performance. We present the overall design for this new version of Tor called AcceleraTor and specify the  modifications made to Tor's source code and OpenSSL libraries to inter-operate with user-level TCP stack mTCP. At the same time, we build a private Tor network and benchmark packet processing times at a single OR for future comparison with AcceleraTor's performance. Our experiments show that packet processing times in a lightly loaded Tor network do not contribute substantially to the overall packet delay and therefore, performance benefits of DPDK for such networks are bound to be limited.
 \end{abstract}
 
 %% INTRODUCTION
 % \input{introduction}
 \section{Introduction}
 \label{sec:intro}
-
 Anonymity refers to the unlinkability of the source or\slash and destination of a communication activity, or the unlinkability of different communication activities belonging to the entity~\cite{Pfitzmann2001}. Anonymity has become an important property in the presence of censorship, privacy breaches by intelligence agencies, and pestering personalized content\slash advertisement delivery by web-based companies. Simultaneously, anonymous communication is being used for organized crime or buying\slash selling of contraband substances, such as the popular online marketplace SilkRoad. With increasing applications and user-base, a number of anonymous networks have been developed such as Mixminion\footnote{\url{http://mixminion.net/}}, Crowds\cite{Reiter:1998:CAW:290163.290168}, etc. For low-latency applications, such as web-browsing, Tor~\cite{Dingledine:2004:TSO:1251375.1251396} remains the most popular and widely-based anonymous network.
-
 
 Tor's design includes a Tor client, `Onion' routers (ORs), and directory servers. All available ORs maintain live TLS connections between each other. When a Tor client wishes to connect to a server such as a website, it randomly picks three ORs from the list of available ORs and initiates Diffie-Hellman Key Exchange with each OR sequentially. Data packets are divided into cells of fixed size (called `onions') and each onion is encrypted in a layered way with the keys exchanged with each selected OR. As each OR receives the onion, it strips down the outermost layer, which is encrypted with its shared key, and forwards the remaining onion to the next OR. If an OR is the last one on the path -- known as the `exit node' -- it reconstructs the packet and forwards it to the website. Data from the website follows the reverse path. While this process only provides data confidentiality, prevention from traffic analysis is provided due to the fact that each OR forwards packets belonging to different traffic streams and therefore, the adversary cannot perform traffic analysis by observing few links/ORs in the Tor network. Additionally, Tor provides hidden services to enable a server to provide service without revealing its IP address or identity.
 
-Despite its popularity, Tor has certain weaknesses which either have been used to breach anonymity or limits its effectiveness in other relevant applications. Unlike mix networks~\cite{Chaum:1981:UEM:358549.358563}, Tor does not perform any explicit buffering, delaying, or reordering of onions. This means that in the absence of sufficient traffic the traffic patterns created at source travel deep into the tor network without significant modifications and can be identified there. Murdoch and Danezis~\cite{Murdoch:2005:LTA:1058433.1059390} used this to launch a side channel attack that reveals the ORs used by a certain anonymous traffic stream. Since, Tor uses the same path for multiple traffic streams belonging to the same client in order to avoid path setup delay, this attack can be used to correlate two communication activities of the same client breaching its anonymity. In spite of optimization done to minimize packet delay, cryptographic processing of numerous packets leads still induces packet delay of the order some milliseconds which makes Tor unsuitable to other applications that have stringent  delay requirements, such as VoIP and streaming. 
+Despite its popularity, Tor has certain weaknesses which either have been used to breach anonymity or limits its effectiveness in other relevant applications. Unlike mix networks~\cite{Chaum:1981:UEM:358549.358563}, Tor does not perform any explicit buffering, delaying, or reordering of onions. This means that in the absence of sufficient traffic the traffic patterns created at source travel deep into the tor network without significant modifications and can be identified there. Murdoch and Danezis~\cite{Murdoch:2005:LTA:1058433.1059390} used this to launch a side channel attack that reveals the ORs used by a certain anonymous traffic stream. Since, Tor uses the same path for multiple traffic streams belonging to the same client in order to avoid path setup delay, this attack can be used to correlate two communication activities of the same client breaching its anonymity. In spite of optimization done to minimize packet delay, cryptographic processing of numerous packets leads still induces packet delay of the order some milliseconds which makes Tor unsuitable to other applications that have stringent  delay requirements, such as VoIP and streaming.
 
-Certain solutions to reduce the packet or path setup delay in Tor have been proposed. LASTor~\cite{6679287} is a modification in the client side of Tor, which ensures that OR chosen for a path are not separated demographically so ensure low transmission delay. Christin et al.~\cite{Christin2013} proposed to reuse the path chosen by a hidden service provider to reach hidden service's directory server for the rendezvous point for the server and the client. While these solutions indeed provide reduction in packet/path setup delay they require fundamental change in Tor's design and have  implications on the anonymity guarantees of Tor. In this work, we intend to reduce overall delay of Tor with the use of Intel's DPDK packet processing framework. (...) DPDK uses optimized functions of handling batches of data and uses specialized data structures, such as ring buffers, to achieve significant improvement in packet processing delay. This project explores benefits of DPDK translate to better performance for Tor and the impact of this approach on Tor's anonymity guarantees. 
+Certain solutions to reduce the packet or path setup delay in Tor have been proposed. LASTor~\cite{6679287} is a modification in the client side of Tor, which ensures that OR chosen for a path are not separated demographically so ensure low transmission delay. Christin et al.~\cite{Christin2013} proposed to reuse the path chosen by a hidden service provider to reach hidden service's directory server for the rendezvous point for the server and the client. While these solutions indeed provide reduction in packet/path setup delay they require fundamental change in Tor's design and have  implications on the anonymity guarantees of Tor. In this work, we intend to reduce overall delay of Tor with the use of Intel's DPDK packet processing framework\footnote{\url{http://dpdk.org/}}. In short, DPDK allows for packet processing at user-space, allowing for applications to establish a direct channel to Network Interface Cards (NICs), bypassing the OS's own networking stack. DPDK uses optimized functions to handling batches of data and uses specialized data structures, such as ring buffers, to achieve significant improvement in packet processing delay. This project explores benefits of DPDK translate to better performance for Tor and the impact of this approach on Tor's anonymity guarantees.
 
-%% MOTIVATION
 %% DESIGN
 \section{acceleraTor Design and Implementation}
 \label{sec:design}
@@ -275,15 +272,13 @@ originally only take a single SSL structure as argument, do not have to be
 changed to include an additional reference to the respective mTCP context as 
 argument. This eases the integration effort on Tor's own source code (`wrapper' 
 functions for OpenSSL's API, defined in \verb+tortls.c+).
-%Unfortunately, this step could not 
-%be fully completed by the end of the project's timeline, which compromised the 
-%possibilities of having a working acceleraTor prototype by the end of the 
-%project. %% don't know if this 
-% should be included here or in a subsequent section...
-% For the sake of completeness, we note that -- as an alternative to the 
-% integration with a user-level TCP stack -- we may have had considered other 
-% options such as Datagram TLS (DTLS)~\cite{rfc4347} to allow for TLS-like 
-% functionalities over `connectionless' protocols such as UDP. Of course, 
+
+Unfortunately, this step could not be fully completed by the end of the project's 
+timeline, which compromised the possibilities of having a working acceleraTor 
+prototype. For the sake of completeness, we note that -- as an alternative to the 
+integration of Tor with a user-level TCP stack -- we may have had considered other 
+options such as building a much simpler transport protocol between ORs, based on UDP, 
+secured with TLS-like schemes such as Datagram TLS (DTLS)~\cite{rfc4347}.
 
 \subsection{mTCP and DPDK}
 \label{subsec:design-dpdk}
@@ -291,7 +286,36 @@ functions for OpenSSL's API, defined in \verb+tortls.c+).
 As of version 3, mTCP comes directly integrated with DPDK (v1.8 and v2.0), and 
 so the relevant issues during development were implementation-related, mostly 
 consisting in finding compromises with (OS- and hardware-level) constraints 
-imposed by both mTCP and DPDK.
+imposed by both mTCP and DPDK. We discuss some of these in detail in section~\ref{subsec:testbed}. 
+
+The interface between the two is accomplished via a
+special module (identified in Figure~\ref{fig:accelerator-design}) as 'mTCP DPDK Module', 
+which essentially initializes DPDK's memory handling libraries, configures access to NICs and its 
+`affinity' to a CPU core, handles read\slash write events. We have started by developing our 
+own module, but during the project's timeline (April 2015), mTCP v3 was released\footnote{April 2, 2015, \url{https://github.com/eunyoung14/mtcp}.}, including a more robust DPDK module compatible with DPDK v1.8 (later v2.0). 
+
+% \begin{itemize}
+% 	\item DPDK-compatible mTCP (v3) could only work with the Linux-3.13.0 kernel (we have used 
+% 		3.13.0-46-lowlatency, which comes with the \verb+uio+ kernel module installed 
+% 		by default);
+% 	\item We have tested setups in both 32- and 64-bit architectures: in the 
+% 		latter case, DPDK's libraries had to be compiled as shared;
+% 	\item DPDK is compatible with a limited set of NICs: we have successfully 
+% 		tested DPDK with Intel 82545 EM\footnote{Oracle Virtual Box: \url{https://www.virtualbox.org/}.}and Intel 82599\cprotect\footnote{AWS EC2 \verb+c4.large+ instances.} Ethernet adapters.
+% \end{itemize}
+
+%% EVALUATION
+\section{Evaluation}
+\label{sec:evaluation}
+
+In this section, we highlight the testbed setup, methodology, and `vanilla' Tor performance benchmarks obtained under our experiments.
+
+\subsection{Testbed Setup}
+\label{subsec:testbed}
+
+Our measurements are carried out in a private Tor network, set up using Amazon EC2 \verb+c4.large+ instances\footnote{\url{http://aws.amazon.com/ec2/instance-types/}}. As shown in Figure~\ref{fig:tor-setup}, the network consists of a single Tor client (\textbf{node1}), three Tor relays (\textbf{node2-4}), a webserver node (\textbf{node-server}) and a gateway machine (\textbf{node-gw}), set for remote access to the testbed. The client node is used to download data from the webserver node, through a `circuit' composed by a sequence of the Tor relays. The reason why we set the number of Tor relays to three is to overcome Tor's randomization in choosing relays for a circuit: i.e. with only three relays, each and every one of the relays will take part in a Tor circuit, for every possible circuit. It is worth to note that the choice of the node measured does not affect the comparison results since each instance has the same computing capacity and the measurements are made on a `per-node' basis.
+
+We experimented with Tor and acceleraTor in both Microsoft Azure\footnote{\url{azure.microsoft.com}} and Amazon Web Services (AWS) platforms. AWS was chose, mainly due to the lack of DPDK compatibility of the resources offered by Azure instances, mainly NICs. AWS' \verb+c4.large+ come with DPDK-compatible NICs (Intel 82599 Ethernet cards). We highlight the following setup\slash implementation notes, which we consider to be useful for future deployments by others:
 
 \begin{itemize}
 	\item DPDK-compatible mTCP (v3) could only work with the Linux-3.13.0 kernel (we have used 
@@ -300,25 +324,52 @@ imposed by both mTCP and DPDK.
 	\item We have tested setups in both 32- and 64-bit architectures: in the 
 		latter case, DPDK's libraries had to be compiled as shared;
 	\item DPDK is compatible with a limited set of NICs: we have successfully 
-		tested DPDK with Intel 82545 EM\footnote{Oracle Virtual Box: \url{https://www.virtualbox.org/}.}and Intel 82599\cprotect\footnote{AWS EC2 \verb+c4.large+ instances.} Ethernet adapters.
+		tested DPDK with Intel 82545 EM\footnote{Oracle Virtual Box: \url{https://www.virtualbox.org/}.}and Intel 82599 Ethernet adapters.
 \end{itemize}
 
-%% EVALUATION
-\section{Evaluation}
-\label{sec:evaluation}
+\begin{figure}[h!]
+	\centering
+	\includegraphics[width=0.45\textwidth]{figures/tor-network.png}
+	\cprotect\caption{Tor Testbed Network}
+	\label{fig:tor-setup}
+\end{figure}
+
+\subsection{Methodology}
+\label{subsec:methodology}
+
+The goal of the measurement is to quantify the per node packet processing latency and compare `vanilla' Tor performance with that of acceleraTor. By packet processing latency we mean the time difference between a packet entering into and exiting out of a Tor node. Tor anonymizes data packets, it is difficult to track individual packets and measure its latency. However, Tor uses ``no mixing, padding, or traffic shaping''\footnote{\url{https://svn.torproject.org/svn/projects/design-paper/tor-design.html}} in its packet processing. Therefore, we assume that the output packets will be in the same order of the input. With this assumption, the corresponding output of any packet entering the Tor node will be the one that comes out of the node in immediate sequence. We hence measure the time difference between the corresponding input and output packets to get the packet processing latency.
+
+\subsection{Results}
+\label{subsec:results}
+
+We performed a number of tests in which the client, i.e. node1, makes HTTP requests to the webserver (node-server), having the webserver send an HTTP response back to the client. We use \verb+wget+ tool for the transfer. Tor's SOCKS proxy does not allow a direct connection from \verb+wget+, and so we use privoxy\footnote{\url{http://www.privoxy.org}} as an HTTP proxy between \verb+wget+ and node1's Tor SOCKs proxy. The download rate of a 1MB file (containing random ASCII text) is set at a rate of 700kbps by \verb+wget+. We logged the `packet in' and `packet out' timings at each OR (via \verb+tcpdump+\footnote{http://www.tcpdump.org/}) and used the difference to compute the packet processing delay at each OR. Tor nodes establish separate TLS connections between successor and predecessor nodes in a circuit, making it hard to track down individual packets: therefore our analysis assumes that ORs do not change the order of packets during processing. This assumption will not hold in the presence of multiple circuits. 
+
+As shown in Figure~\ref{fig:result}, the packet processing time at the Tor relay node installed with `vanilla' Tor follows a Gaussian distribution with mean of 0.6\,ms and std. dev. 0.15\,ms. Given that overall packet delay in a Tor network is of the order of 500-600\,ms, the packet processing delay at each OR of our testbed is an insignificant contributor. This implies that under a lightly-loaded Tor network, packet processing efficiency of DPDK will not have a major impact on Tor's performance. The impact on a heavily-loaded, large-scale Tor network remains to be analyzed. 
+
+\begin{figure}[h!]
+	\centering
+	\includegraphics[width=0.45\textwidth]{figures/packet-latency-distribution.png}
+	\cprotect\caption{Packet processing time distribution at a Tor relay}
+	\label{fig:result}
+\end{figure}
+%% RELATED WORK
 
 %% RELATED WORK
 \section{Related Work}
 \label{sec:re-work}
-Tor is a widely used anonymous network on the Internet. There is a large body of work which have attempted to improve Tor’s performance. Some approaches include the refinement of Tor’s relay selection strategy \cite{6679287, Sherr10a3:an, Snader08atune-up}. Akhoondi et al.~\cite{6679287} have proposed an approach that brings performance gains by trading off between the anonymity and latency. Such approaches are orthogonal to our approach and can be used in conjunction with acceleraTor as we do not modify the path selection algorithm.
-Jansen et al.~\cite{184431} propose a socket management algorithm that uses real-time kernal information to compute the amount of information to write to each socket to avoid congestion bottleneck which is claimed to occur in egress kernel socket.
-Torchestra~\cite{Gopal:2012:TRI:2381966.2381972} uses TCP connections to carry bulk traffic in order to isolate effects of congestions betwen different traffic classes and their proposal is based on the analysis that bulk downloads cause delays for interactive traffic. 
+Tor is a widely used anonymous network on the Internet. There is a large body of work which have attempted to improve Tor's performance. Some approaches include the refinement of Tor's relay selection strategy \cite{6679287, Sherr10a3:an, Snader08atune-up}. Akhoondi et al.~\cite{6679287} have proposed an approach that brings performance gains by trading off between the anonymity and latency. Such approaches are orthogonal to our approach and can be used in conjunction with acceleraTor as we do not modify the path selection algorithm.
+Jansen et al.~\cite{184431} propose a socket management algorithm that uses real-time kernel information to compute the amount of information to write to each socket to avoid congestion bottleneck which is claimed to occur in egress kernel socket.
+Torchestra~\cite{Gopal:2012:TRI:2381966.2381972} uses TCP connections to carry bulk traffic in order to isolate effects of congestion between different traffic classes and their proposal is based on the analysis that bulk downloads cause delays for interactive traffic. 
 AlSabah et al.~\cite{AlSabah:2011:DTO:2032162.2032170} proposed DefenestraTor which modifies traffic management in Tor relays to reduce queuing delays. Panchenko et al.~\cite{5230652} proposed path selection algorithms to choose the path inferring from available bandwidth on each relay.  
-As described, many works have focused on the choosing of path selection algorithms but authors~\cite{Panchenko:2008:PAA:1371602.1371906} have also studied the tradeoff between improved performance and anonymity. However, our approach does not deal with path selection algorithms, thus will not hurt anonimity due to having low diversity in path selection. Other approaches to improve performance of Tor have proposed  incentive-based means to users to relay Tor circuits~\cite{Jansen:2010:RNT:1866307.1866344, Jansen_lira:lightweight}. Nowlan et al.~\cite{179191} proposed the use of uTCP and uTLS~\cite{180706} to tackle the head-of-line blocking problem between Tor cirtuis sharing TCP connections to relax the in-order delivery assumptions of TCP. 
+As described, many works have focused on the choosing of path selection algorithms but authors~\cite{Panchenko:2008:PAA:1371602.1371906} have also studied the trade off between improved performance and anonymity. However, our approach does not deal with path selection algorithms, thus will not hurt anonymity due to having low diversity in path selection. Other approaches to improve performance of Tor have proposed  incentive-based means to users to relay Tor circuits~\cite{Jansen:2010:RNT:1866307.1866344, Jansen_lira:lightweight}. Nowlan et al.~\cite{179191} proposed the use of uTCP and uTLS~\cite{180706} to tackle the head-of-line blocking problem between Tor circuits sharing TCP connections to relax the in-order delivery assumptions of TCP. 
 
 %% CONCLUSIONS
 \section{Conclusions and Future Work}
 \label{sec:conclusions}
+
+In this work we explored the idea of using DPDK to fasten packet processing at Tor ORs. We propose acceleraTor, a design for the integration of Tor's source code with DPDK, via an intermediate user-level TCP stack, mTCP. Unfortunately, due to problems in the integration of OpenSSL with mTCP we could not achieve a working acceleraTor prototype. Nevertheless, our design appears to be valid, and a significant amount of practical implementation and deployment issues have been covered.
+
+The success of this project has implications on Tor's applicability to VoIP, data streaming etc. Our results, however, show that for a lightly-loaded Tor network, packet processing times are not a significant contributor to the overall pacekt delay and therefore faster packet processing will not improve Tor's performance in a tangible manner. We leave the analysis under a large-scale, heavily-loaded Tor network as future work.
 
 % \input{motivation}
 % \input{design}
